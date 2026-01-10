@@ -27,9 +27,9 @@
 
         {{if .Error}}
         <div class="err">Error: {{.Error}}</div>
-        {{end}} {{if .Instances}}
+        {{end}} {{if .InstancesJSON}}
         <h2>Instances</h2>
-        <pre>{{printf "%v" .Instances}}</pre>
+        <pre class="code">{{.InstancesJSON}}</pre>
         {{end}}
 
         <h2>Terraform Logs</h2>

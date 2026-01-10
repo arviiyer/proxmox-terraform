@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -19,35 +20,35 @@ import (
 var templatesFS embed.FS
 
 type Config struct {
-	TerraformDir          string `json:"terraform_dir"`
-	AllowedTemplates      []struct {
+	TerraformDir     string `json:"terraform_dir"`
+	AllowedTemplates []struct {
 		Name string `json:"name"`
 		VMID int    `json:"vmid"`
 	} `json:"allowed_templates"`
 	AllowedInstanceTypes []string `json:"allowed_instance_types"`
 	Defaults             struct {
-		NodeName      string `json:"node_name"`
-		Bridge        string `json:"bridge"`
-		CIUser        string `json:"ci_user"`
-		CIDatastore   string `json:"ci_datastore"`
-		FullClone     bool   `json:"full_clone"`
-		InstanceType  string `json:"instance_type"`
+		NodeName     string `json:"node_name"`
+		Bridge       string `json:"bridge"`
+		CIUser       string `json:"ci_user"`
+		CIDatastore  string `json:"ci_datastore"`
+		FullClone    bool   `json:"full_clone"`
+		InstanceType string `json:"instance_type"`
 	} `json:"defaults"`
 }
 
 type LaunchForm struct {
-	TemplateVMID  int
-	InstanceType  string
-	Count         int
-	NamePrefix    string
-	VMIDStart     int
-	FullClone     bool
+	TemplateVMID int
+	InstanceType string
+	Count        int
+	NamePrefix   string
+	VMIDStart    int
+	FullClone    bool
 }
 
 type Result struct {
-	Logs      string
-	Instances any
-	Error     string
+	Logs          string
+	InstancesJSON string
+	Error         string
 }
 
 var (
@@ -67,10 +68,10 @@ func main() {
 	}
 
 	tmpl = template.Must(template.ParseFS(
-    templatesFS,
-    "web/templates/index.html",
-    "web/templates/result.html",
-))
+		templatesFS,
+		"web/templates/index.html",
+		"web/templates/result.html",
+	))
 
 	http.HandleFunc("/", handleIndex)
 	http.HandleFunc("/launch", handleLaunch)
@@ -157,16 +158,16 @@ func handleLaunch(w http.ResponseWriter, r *http.Request) {
 
 	// Create var-file payload matching your Terraform variables
 	varPayload := map[string]any{
-		"template_vmid":  form.TemplateVMID,
-		"instance_type":  form.InstanceType,
-		"full_clone":     form.FullClone,
-		"vms":            vms,
+		"template_vmid": form.TemplateVMID,
+		"instance_type": form.InstanceType,
+		"full_clone":    form.FullClone,
+		"vms":           vms,
 
 		// optional pass-throughs so portal can set defaults without editing tfvars
-		"node_name":      cfg.Defaults.NodeName,
-		"bridge":         cfg.Defaults.Bridge,
-		"ci_user":        cfg.Defaults.CIUser,
-		"ci_datastore":   cfg.Defaults.CIDatastore,
+		"node_name":    cfg.Defaults.NodeName,
+		"bridge":       cfg.Defaults.Bridge,
+		"ci_user":      cfg.Defaults.CIUser,
+		"ci_datastore": cfg.Defaults.CIDatastore,
 		// ssh_public_key should come from env or keep in tfvars; if you want portal to set it, add it here.
 	}
 
@@ -177,6 +178,8 @@ func handleLaunch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	logs, err := runner.Apply(ctx, varFile)
+	logs = stripANSI(logs)
+
 	if err != nil {
 		renderResult(w, Result{Logs: logs, Error: err.Error()})
 		return
@@ -192,7 +195,15 @@ func handleLaunch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	instances := out["instances"]
-	renderResult(w, Result{Logs: logs, Instances: instances})
+
+	pretty := ""
+	if b, err := json.MarshalIndent(instances, "", "  "); err == nil {
+		pretty = string(b)
+	} else {
+		pretty = fmt.Sprintf("%v", instances)
+	}
+
+	renderResult(w, Result{Logs: logs, InstancesJSON: pretty})
 }
 
 func parseLaunchForm(r *http.Request) (LaunchForm, error) {
@@ -231,4 +242,10 @@ func isAllowedInstanceType(s string) bool {
 
 func renderResult(w http.ResponseWriter, res Result) {
 	_ = tmpl.ExecuteTemplate(w, "result.html", res)
+}
+
+var ansiRE = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+
+func stripANSI(s string) string {
+	return ansiRE.ReplaceAllString(s, "")
 }
