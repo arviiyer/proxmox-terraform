@@ -1,0 +1,113 @@
+<!doctype html>
+<html>
+    <head>
+        <meta charset="utf-8" />
+        <title>Proxmox EC2-ish Portal</title>
+        <style>
+            body {
+                font-family: system-ui, sans-serif;
+                margin: 24px;
+                max-width: 900px;
+            }
+            .card {
+                border: 1px solid #ddd;
+                border-radius: 10px;
+                padding: 16px;
+            }
+            label {
+                display: block;
+                margin-top: 12px;
+                font-weight: 600;
+            }
+            input,
+            select {
+                width: 100%;
+                padding: 8px;
+                margin-top: 6px;
+            }
+            .row {
+                display: flex;
+                gap: 12px;
+            }
+            .row > div {
+                flex: 1;
+            }
+            button {
+                margin-top: 16px;
+                padding: 10px 14px;
+                font-weight: 700;
+            }
+            .hint {
+                color: #666;
+                font-size: 13px;
+                margin-top: 4px;
+            }
+        </style>
+    </head>
+    <body>
+        <h1>Launch Instances</h1>
+        <div class="card">
+            <form method="POST" action="/launch">
+                <label>Template (AMI)</label>
+                <select name="template_vmid" required>
+                    {{range .templates}}
+                    <option value="{{.VMID}}">
+                        {{.Name}} (VMID {{.VMID}})
+                    </option>
+                    {{end}}
+                </select>
+
+                <label>Instance Type</label>
+                <select name="instance_type" required>
+                    {{range .instanceTypes}}
+                    <option
+                        value="{{.}}"
+                        {{if
+                        eq
+                        .
+                        $.defaults.InstanceType}}selected{{end}}
+                    >
+                        {{.}}
+                    </option>
+                    {{end}}
+                </select>
+
+                <div class="row">
+                    <div>
+                        <label>Count</label>
+                        <input
+                            name="count"
+                            type="number"
+                            min="1"
+                            max="50"
+                            value="1"
+                        />
+                    </div>
+                    <div>
+                        <label>VMID Start</label>
+                        <input
+                            name="vmid_start"
+                            type="number"
+                            min="100"
+                            value="200"
+                        />
+                        <div class="hint">
+                            Choose a free range (e.g., 200+).
+                        </div>
+                    </div>
+                </div>
+
+                <label>Name Prefix</label>
+                <input name="name_prefix" value="vm" />
+                <div class="hint">Creates vm-01, vm-02, ...</div>
+
+                <label
+                    ><input type="checkbox" name="full_clone" /> Full clone
+                    (slower, independent disk)</label
+                >
+
+                <button type="submit">Launch</button>
+            </form>
+        </div>
+    </body>
+</html>

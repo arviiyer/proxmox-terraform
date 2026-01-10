@@ -1,0 +1,23 @@
+{
+  "terraform_dir": "../infra",
+  "allowed_templates": [{ "name": "debian13-docker", "vmid": 8000 }],
+  "allowed_instance_types": [
+    "general-nano",
+    "general-small",
+    "general-medium",
+    "general-large",
+    "general-xlarge",
+    "compute-medium",
+    "compute-large",
+    "memory-medium",
+    "memory-large"
+  ],
+  "defaults": {
+    "node_name": "summerset",
+    "bridge": "vmbr0",
+    "ci_user": "arvind",
+    "ci_datastore": "local-lvm",
+    "full_clone": false,
+    "instance_type": "general-small"
+  }
+}
