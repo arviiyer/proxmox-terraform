@@ -1,0 +1,40 @@
+<!doctype html>
+<html>
+    <head>
+        <meta charset="utf-8" />
+        <title>Launch Result</title>
+        <style>
+            body {
+                font-family: system-ui, sans-serif;
+                margin: 24px;
+                max-width: 900px;
+            }
+            pre {
+                background: #111;
+                color: #eee;
+                padding: 12px;
+                border-radius: 10px;
+                overflow: auto;
+            }
+            .err {
+                color: #b00020;
+                font-weight: 800;
+            }
+        </style>
+    </head>
+    <body>
+        <h1>Result</h1>
+
+        {{if .Error}}
+        <div class="err">Error: {{.Error}}</div>
+        {{end}} {{if .Instances}}
+        <h2>Instances</h2>
+        <pre>{{printf "%v" .Instances}}</pre>
+        {{end}}
+
+        <h2>Terraform Logs</h2>
+        <pre>{{.Logs}}</pre>
+
+        <p><a href="/">Back</a></p>
+    </body>
+</html>
