@@ -9,14 +9,16 @@ locals {
     "general-nano"   = { cores = 1, memory = 1024, disk = 20 }
     "general-small"  = { cores = 2, memory = 2048, disk = 40 }
     "general-medium" = { cores = 4, memory = 8192, disk = 80 }
-    "general-large"  = { cores = 8, memory = 16384, disk = 512 }
-    "general-xlarge" = { cores = 16, memory = 32768, disk = 512 }
+    "general-large"  = { cores = 6, memory = 16384, disk = 160 }
+    "general-xlarge" = { cores = 8, memory = 24576, disk = 256 }
 
-    "compute-medium" = { cores = 4, memory = 4096, disk = 80 }
-    "compute-large"  = { cores = 8, memory = 8192, disk = 160 }
+    "compute-medium" = { cores = 8, memory = 8192, disk = 80 }
+    "compute-large"  = { cores = 12, memory = 12288, disk = 160 }
+    "compute-xlarge" = { cores = 16, memory = 16384, disk = 256 }
 
-    "memory-medium" = { cores = 4, memory = 16384, disk = 160 }
-    "memory-large"  = { cores = 8, memory = 32768, disk = 320 }
+    "memory-medium" = { cores = 4, memory = 16384, disk = 80 }
+    "memory-large"  = { cores = 6, memory = 24576, disk = 160 }
+    "memory-xlarge" = { cores = 8, memory = 32768, disk = 256 }
   }
 
   f = lookup(local.flavors, var.instance_type, local.flavors["general-small"])
@@ -69,4 +71,3 @@ resource "proxmox_virtual_environment_vm" "vm" {
     }
   }
 }
-

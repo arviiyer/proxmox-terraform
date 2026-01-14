@@ -9,8 +9,10 @@
     "general-xlarge",
     "compute-medium",
     "compute-large",
+    "compute-xlarge",
     "memory-medium",
-    "memory-large"
+    "memory-large",
+    "memory-xlarge"
   ],
   "defaults": {
     "node_name": "summerset",
