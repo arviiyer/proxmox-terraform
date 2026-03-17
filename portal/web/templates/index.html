@@ -42,10 +42,50 @@
                 font-size: 13px;
                 margin-top: 4px;
             }
+            table {
+                width: 100%;
+                border-collapse: collapse;
+                margin-bottom: 24px;
+            }
+            th, td {
+                text-align: left;
+                padding: 8px 12px;
+                border-bottom: 1px solid #ddd;
+            }
+            th {
+                font-weight: 600;
+                background: #f5f5f5;
+            }
         </style>
     </head>
     <body>
-        <h1>Launch Instances</h1>
+        <h1>Instances</h1>
+        {{if .instances}}
+        <table>
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>VMID</th>
+                    <th>Node</th>
+                    <th>IP</th>
+                </tr>
+            </thead>
+            <tbody>
+                {{range .instances}}
+                <tr>
+                    <td>{{.Name}}</td>
+                    <td>{{.VMID}}</td>
+                    <td>{{.Node}}</td>
+                    <td>{{if .PrivateIP}}{{.PrivateIP}}{{else}}—{{end}}</td>
+                </tr>
+                {{end}}
+            </tbody>
+        </table>
+        {{else}}
+        <p class="hint">No instances.</p>
+        {{end}}
+
+        <h2>Launch</h2>
         <div class="card">
             <form method="POST" action="/launch">
                 <label>Template (AMI)</label>
