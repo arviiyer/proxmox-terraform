@@ -52,9 +52,10 @@ type Result struct {
 }
 
 var (
-	cfg       Config
-	tmpl      *template.Template
-	applyLock sync.Mutex // prevent concurrent applies against same local state
+	cfg          Config
+	tmpl         *template.Template
+	applyLock    sync.Mutex // prevent concurrent applies against same local state
+	sshPublicKey string
 )
 
 func main() {
@@ -65,6 +66,11 @@ func main() {
 	}
 	if err := json.Unmarshal(b, &cfg); err != nil {
 		log.Fatalf("parse config.json: %v", err)
+	}
+
+	sshPublicKey = os.Getenv("SSH_PUBLIC_KEY")
+	if sshPublicKey == "" {
+		log.Fatal("SSH_PUBLIC_KEY env var is required")
 	}
 
 	tmpl = template.Must(template.ParseFS(
@@ -149,11 +155,24 @@ func handleLaunch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Build vms map: name -> vmid
-	vms := map[string]int{}
+	// Read existing state so we can merge rather than replace
+	existingVMs := map[string]int{}
+	if existing, err := runner.OutputJSON(ctx); err == nil {
+		existingVMs = extractVMsFromOutput(existing)
+	}
+
+	// Build new vms map: name -> vmid
+	newVMs := map[string]int{}
 	for i := 0; i < form.Count; i++ {
 		name := fmt.Sprintf("%s-%02d", form.NamePrefix, i+1)
-		vms[name] = form.VMIDStart + i
+		newVMs[name] = form.VMIDStart + i
+	}
+
+	// Conflict check + merge
+	vms, err := mergeVMs(existingVMs, newVMs)
+	if err != nil {
+		renderResult(w, Result{Error: err.Error()})
+		return
 	}
 
 	// Create var-file payload matching your Terraform variables
@@ -163,12 +182,11 @@ func handleLaunch(w http.ResponseWriter, r *http.Request) {
 		"full_clone":    form.FullClone,
 		"vms":           vms,
 
-		// optional pass-throughs so portal can set defaults without editing tfvars
-		"node_name":    cfg.Defaults.NodeName,
-		"bridge":       cfg.Defaults.Bridge,
-		"ci_user":      cfg.Defaults.CIUser,
-		"ci_datastore": cfg.Defaults.CIDatastore,
-		// ssh_public_key should come from env or keep in tfvars; if you want portal to set it, add it here.
+		"node_name":      cfg.Defaults.NodeName,
+		"bridge":         cfg.Defaults.Bridge,
+		"ci_user":        cfg.Defaults.CIUser,
+		"ci_datastore":   cfg.Defaults.CIDatastore,
+		"ssh_public_key": sshPublicKey,
 	}
 
 	varFile, err := tf.WriteVarFileJSON(cfg.TerraformDir, varPayload)
@@ -194,7 +212,8 @@ func handleLaunch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	instances := out["instances"]
+	outMeta, _ := out["instances"].(map[string]any)
+	instances := outMeta["value"]
 
 	pretty := ""
 	if b, err := json.MarshalIndent(instances, "", "  "); err == nil {
@@ -207,10 +226,18 @@ func handleLaunch(w http.ResponseWriter, r *http.Request) {
 }
 
 func parseLaunchForm(r *http.Request) (LaunchForm, error) {
-	tpl, _ := strconv.Atoi(r.FormValue("template_vmid"))
-	count, _ := strconv.Atoi(r.FormValue("count"))
-	vmidStart, _ := strconv.Atoi(r.FormValue("vmid_start"))
-	fullClone := r.FormValue("full_clone") == "on"
+	tpl, err := strconv.Atoi(r.FormValue("template_vmid"))
+	if err != nil {
+		return LaunchForm{}, fmt.Errorf("invalid template_vmid: %w", err)
+	}
+	count, err := strconv.Atoi(r.FormValue("count"))
+	if err != nil {
+		return LaunchForm{}, fmt.Errorf("invalid count: %w", err)
+	}
+	vmidStart, err := strconv.Atoi(r.FormValue("vmid_start"))
+	if err != nil {
+		return LaunchForm{}, fmt.Errorf("invalid vmid_start: %w", err)
+	}
 
 	return LaunchForm{
 		TemplateVMID: tpl,
@@ -218,7 +245,7 @@ func parseLaunchForm(r *http.Request) (LaunchForm, error) {
 		Count:        count,
 		NamePrefix:   r.FormValue("name_prefix"),
 		VMIDStart:    vmidStart,
-		FullClone:    fullClone,
+		FullClone:    r.FormValue("full_clone") == "on",
 	}, nil
 }
 
@@ -244,8 +271,47 @@ func renderResult(w http.ResponseWriter, res Result) {
 	_ = tmpl.ExecuteTemplate(w, "result.html", res)
 }
 
-var ansiRE = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+var ansiRE = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
 
 func stripANSI(s string) string {
 	return ansiRE.ReplaceAllString(s, "")
+}
+
+// mergeVMs checks newVMs for name/VMID conflicts with existingVMs, then returns
+// the merged map (existing + new) to be passed to Terraform.
+func mergeVMs(existing, incoming map[string]int) (map[string]int, error) {
+	for name, vmid := range incoming {
+		if _, exists := existing[name]; exists {
+			return nil, fmt.Errorf("VM name %q already exists in state", name)
+		}
+		for existingName, existingVMID := range existing {
+			if existingVMID == vmid {
+				return nil, fmt.Errorf("VMID %d is already used by %q", vmid, existingName)
+			}
+		}
+	}
+	merged := make(map[string]int, len(existing)+len(incoming))
+	for k, v := range existing {
+		merged[k] = v
+	}
+	for k, v := range incoming {
+		merged[k] = v
+	}
+	return merged, nil
+}
+
+// extractVMsFromOutput rebuilds a name->vmid map from terraform output JSON.
+func extractVMsFromOutput(out map[string]any) map[string]int {
+	result := map[string]int{}
+	meta, _ := out["instances"].(map[string]any)
+	items, _ := meta["value"].([]any)
+	for _, item := range items {
+		m, _ := item.(map[string]any)
+		name, _ := m["name"].(string)
+		vmidF, _ := m["vm_id"].(float64)
+		if name != "" {
+			result[name] = int(vmidF)
+		}
+	}
+	return result
 }

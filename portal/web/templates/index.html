@@ -102,7 +102,7 @@
                 <div class="hint">Creates vm-01, vm-02, ...</div>
 
                 <label
-                    ><input type="checkbox" name="full_clone" /> Full clone
+                    ><input type="checkbox" name="full_clone" {{if $.defaults.FullClone}}checked{{end}} /> Full clone
                     (slower, independent disk)</label
                 >
 

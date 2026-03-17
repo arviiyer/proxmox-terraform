@@ -1,6 +1,6 @@
 {
   "terraform_dir": "../infra",
-  "allowed_templates": [{ "name": "debian13-docker", "vmid": 8000 }],
+  "allowed_templates": [{ "name": "debian13-docker", "vmid": 8000 }, { "name": "debian13-base", "vmid": 9001 }],
   "allowed_instance_types": [
     "general-nano",
     "general-small",
