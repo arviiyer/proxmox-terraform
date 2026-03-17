@@ -51,11 +51,20 @@ type Result struct {
 	Error         string
 }
 
+type Instance struct {
+	Name      string
+	VMID      int
+	Node      string
+	PrivateIP string
+}
+
 var (
 	cfg          Config
 	tmpl         *template.Template
 	applyLock    sync.Mutex // prevent concurrent applies against same local state
 	sshPublicKey string
+	pveEndpoint  string
+	pveAPIToken  string
 )
 
 func main() {
@@ -71,6 +80,14 @@ func main() {
 	sshPublicKey = os.Getenv("SSH_PUBLIC_KEY")
 	if sshPublicKey == "" {
 		log.Fatal("SSH_PUBLIC_KEY env var is required")
+	}
+	pveEndpoint = os.Getenv("PVE_ENDPOINT")
+	if pveEndpoint == "" {
+		log.Fatal("PVE_ENDPOINT env var is required")
+	}
+	pveAPIToken = os.Getenv("PVE_API_TOKEN")
+	if pveAPIToken == "" {
+		log.Fatal("PVE_API_TOKEN env var is required")
 	}
 
 	tmpl = template.Must(template.ParseFS(
@@ -94,10 +111,19 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var instances []Instance
+	runner := tf.Runner{Dir: cfg.TerraformDir}
+	ctx, cancel := tf.DefaultTimeoutCtx()
+	defer cancel()
+	if out, err := runner.OutputJSON(ctx); err == nil {
+		instances = parseInstances(out)
+	}
+
 	data := map[string]any{
 		"templates":     cfg.AllowedTemplates,
 		"instanceTypes": cfg.AllowedInstanceTypes,
 		"defaults":      cfg.Defaults,
+		"instances":     instances,
 	}
 	_ = tmpl.ExecuteTemplate(w, "index.html", data)
 }
@@ -187,6 +213,8 @@ func handleLaunch(w http.ResponseWriter, r *http.Request) {
 		"ci_user":        cfg.Defaults.CIUser,
 		"ci_datastore":   cfg.Defaults.CIDatastore,
 		"ssh_public_key": sshPublicKey,
+		"pve_endpoint":   pveEndpoint,
+		"pve_api_token":  pveAPIToken,
 	}
 
 	varFile, err := tf.WriteVarFileJSON(cfg.TerraformDir, varPayload)
@@ -298,6 +326,29 @@ func mergeVMs(existing, incoming map[string]int) (map[string]int, error) {
 		merged[k] = v
 	}
 	return merged, nil
+}
+
+// parseInstances extracts the full instance list from terraform output JSON.
+func parseInstances(out map[string]any) []Instance {
+	meta, _ := out["instances"].(map[string]any)
+	items, _ := meta["value"].([]any)
+	result := make([]Instance, 0, len(items))
+	for _, item := range items {
+		m, _ := item.(map[string]any)
+		name, _ := m["name"].(string)
+		vmidF, _ := m["vm_id"].(float64)
+		node, _ := m["node"].(string)
+		ip, _ := m["private_ip"].(string)
+		if name != "" {
+			result = append(result, Instance{
+				Name:      name,
+				VMID:      int(vmidF),
+				Node:      node,
+				PrivateIP: ip,
+			})
+		}
+	}
+	return result
 }
 
 // extractVMsFromOutput rebuilds a name->vmid map from terraform output JSON.
