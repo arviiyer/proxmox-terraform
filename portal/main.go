@@ -78,6 +78,7 @@ var (
 	tmpl          *template.Template
 	applyLock     sync.Mutex // prevent concurrent applies against same local state
 	sshPublicKey  string
+	sshNodeKey    string
 	pveEndpoint   string
 	pveAPIToken   string
 	protectedLock sync.Mutex
@@ -106,6 +107,16 @@ func main() {
 	if pveAPIToken == "" {
 		log.Fatal("PVE_API_TOKEN env var is required")
 	}
+
+	keyFile := os.Getenv("SSH_NODE_KEY_FILE")
+	if keyFile == "" {
+		keyFile = os.Getenv("HOME") + "/.ssh/id_ed25519"
+	}
+	keyBytes, err := os.ReadFile(keyFile)
+	if err != nil {
+		log.Fatalf("read SSH node key %q: %v", keyFile, err)
+	}
+	sshNodeKey = string(keyBytes)
 
 	pveClient = pve.New(pveEndpoint, pveAPIToken)
 
@@ -258,6 +269,7 @@ func handleLaunch(w http.ResponseWriter, r *http.Request) {
 		"ci_user":        cfg.Defaults.CIUser,
 		"ci_datastore":   cfg.Defaults.CIDatastore,
 		"ssh_public_key": sshPublicKey,
+		"ssh_node_key":   sshNodeKey,
 		"pve_endpoint":   pveEndpoint,
 		"pve_api_token":  pveAPIToken,
 	}
@@ -488,6 +500,7 @@ func handleDestroy(w http.ResponseWriter, r *http.Request) {
 		"ci_user":          cfg.Defaults.CIUser,
 		"ci_datastore":     cfg.Defaults.CIDatastore,
 		"ssh_public_key":   sshPublicKey,
+		"ssh_node_key":     sshNodeKey,
 		"pve_endpoint":     pveEndpoint,
 		"pve_api_token":    pveAPIToken,
 	}

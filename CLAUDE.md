@@ -16,12 +16,18 @@ cd portal && go run main.go
 cd portal && go build -o portal
 ```
 
-All three env vars are required — the server fatals at startup if any are missing:
+These env vars are required — the server fatals at startup if any are missing:
 ```bash
 PVE_ENDPOINT="https://your-proxmox-host"   # no :8006 if behind a reverse proxy
 PVE_API_TOKEN="user@pam!tokenid=secret"
-SSH_PUBLIC_KEY="ssh-ed25519 ..."
+SSH_PUBLIC_KEY="ssh-ed25519 ..."           # injected into VMs at cloud-init
 ```
+
+Optional:
+```bash
+SSH_NODE_KEY_FILE="/home/user/.ssh/id_ed25519"  # defaults to ~/.ssh/id_ed25519
+```
+The private key at `SSH_NODE_KEY_FILE` is used by the bpg/proxmox Terraform provider to SSH into Proxmox nodes as `root` when writing snippet files (user data). Only needed when launching VMs with user data.
 
 No external Go dependencies — stdlib only. Requires Terraform >= 1.5.0 and the bpg/proxmox provider.
 

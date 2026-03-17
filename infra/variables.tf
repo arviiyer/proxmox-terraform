@@ -61,6 +61,12 @@ variable "ssh_public_key" {
   type = string
 }
 
+variable "ssh_node_key" {
+  description = "Private SSH key content for the provider to connect to Proxmox nodes (needed for snippet file uploads)."
+  type        = string
+  sensitive   = true
+}
+
 variable "instance_type" {
   description = "EC2-like flavor mapping"
   type        = string
