@@ -18,6 +18,7 @@
   "defaults": {
     "node_name": "summerset",
     "template_node": "summerset",
+    "snippets_storage": "proxmox-nas",
     "bridge": "vmbr0",
     "ci_user": "arvind",
     "ci_datastore": "local-lvm",

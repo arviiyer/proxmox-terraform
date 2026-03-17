@@ -60,7 +60,8 @@ resource "proxmox_virtual_environment_vm" "vm" {
   }
 
   initialization {
-    datastore_id = var.ci_datastore
+    datastore_id      = var.ci_datastore
+    user_data_file_id = var.user_data_file_id != "" ? var.user_data_file_id : null
 
     user_account {
       username = var.ci_user

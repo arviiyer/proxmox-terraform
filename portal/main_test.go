@@ -196,25 +196,28 @@ func TestExtractVMsFromShow(t *testing.T) {
 	tests := []struct {
 		name string
 		show map[string]any
-		want map[string]int
+		want map[string]VMEntry
 	}{
 		{
 			name: "normal state",
 			show: buildShowJSON([]map[string]any{
 				{"name": "vm-01", "vm_id": float64(200), "node_name": "summerset", "ipv4_addresses": []any{}},
-				{"name": "vm-02", "vm_id": float64(201), "node_name": "summerset", "ipv4_addresses": []any{}},
+				{"name": "vm-02", "vm_id": float64(201), "node_name": "valenwood", "ipv4_addresses": []any{}},
 			}),
-			want: map[string]int{"vm-01": 200, "vm-02": 201},
+			want: map[string]VMEntry{
+				"vm-01": {VMID: 200, Node: "summerset"},
+				"vm-02": {VMID: 201, Node: "valenwood"},
+			},
 		},
 		{
 			name: "empty state",
 			show: buildShowJSON([]map[string]any{}),
-			want: map[string]int{},
+			want: map[string]VMEntry{},
 		},
 		{
 			name: "missing values key (fresh state)",
 			show: map[string]any{},
-			want: map[string]int{},
+			want: map[string]VMEntry{},
 		},
 	}
 
@@ -224,9 +227,9 @@ func TestExtractVMsFromShow(t *testing.T) {
 			if len(got) != len(tt.want) {
 				t.Fatalf("got %d entries, want %d: %v", len(got), len(tt.want), got)
 			}
-			for name, vmid := range tt.want {
-				if got[name] != vmid {
-					t.Errorf("got[%q] = %d, want %d", name, got[name], vmid)
+			for name, want := range tt.want {
+				if got[name] != want {
+					t.Errorf("got[%q] = %+v, want %+v", name, got[name], want)
 				}
 			}
 		})
@@ -267,39 +270,39 @@ func TestParseInstancesFromShow(t *testing.T) {
 func TestMergeVMs(t *testing.T) {
 	tests := []struct {
 		name     string
-		existing map[string]int
-		incoming map[string]int
+		existing map[string]VMEntry
+		incoming map[string]VMEntry
 		wantErr  string
 		wantLen  int
 	}{
 		{
 			name:     "fresh state, no conflicts",
-			existing: map[string]int{},
-			incoming: map[string]int{"vm-01": 200, "vm-02": 201},
+			existing: map[string]VMEntry{},
+			incoming: map[string]VMEntry{"vm-01": {200, "summerset"}, "vm-02": {201, "summerset"}},
 			wantLen:  2,
 		},
 		{
-			name:     "existing vms, no conflicts",
-			existing: map[string]int{"vm-01": 200},
-			incoming: map[string]int{"vm-02": 201},
+			name:     "existing vms, no conflicts — different nodes",
+			existing: map[string]VMEntry{"vm-01": {200, "summerset"}},
+			incoming: map[string]VMEntry{"vm-02": {201, "valenwood"}},
 			wantLen:  2,
 		},
 		{
 			name:     "name conflict",
-			existing: map[string]int{"vm-01": 200},
-			incoming: map[string]int{"vm-01": 201},
+			existing: map[string]VMEntry{"vm-01": {200, "summerset"}},
+			incoming: map[string]VMEntry{"vm-01": {201, "skyrim"}},
 			wantErr:  `VM name "vm-01" already exists in state`,
 		},
 		{
 			name:     "vmid conflict",
-			existing: map[string]int{"vm-01": 200},
-			incoming: map[string]int{"vm-02": 200},
+			existing: map[string]VMEntry{"vm-01": {200, "summerset"}},
+			incoming: map[string]VMEntry{"vm-02": {200, "valenwood"}},
 			wantErr:  `VMID 200 is already used by "vm-01"`,
 		},
 		{
-			name:     "merged map contains both existing and incoming",
-			existing: map[string]int{"vm-01": 200},
-			incoming: map[string]int{"vm-02": 201},
+			name:     "merged map preserves node per vm",
+			existing: map[string]VMEntry{"vm-01": {200, "summerset"}},
+			incoming: map[string]VMEntry{"vm-02": {201, "valenwood"}},
 			wantLen:  2,
 		},
 	}
@@ -324,12 +327,12 @@ func TestMergeVMs(t *testing.T) {
 			}
 			for k, v := range tt.existing {
 				if got[k] != v {
-					t.Errorf("existing key %q: got %d, want %d", k, got[k], v)
+					t.Errorf("existing key %q: got %+v, want %+v", k, got[k], v)
 				}
 			}
 			for k, v := range tt.incoming {
 				if got[k] != v {
-					t.Errorf("incoming key %q: got %d, want %d", k, got[k], v)
+					t.Errorf("incoming key %q: got %+v, want %+v", k, got[k], v)
 				}
 			}
 		})

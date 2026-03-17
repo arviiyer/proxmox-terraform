@@ -285,6 +285,15 @@
                     (slower, independent disk)</label
                 >
 
+                <label>User Data <span style="font-weight:400;color:#666">(optional — cloud-init script)</span></label>
+                <textarea
+                    name="user_data"
+                    rows="6"
+                    style="width:100%;padding:8px;margin-top:6px;font-family:monospace;font-size:13px"
+                    placeholder="#cloud-config&#10;packages:&#10;  - nginx"
+                ></textarea>
+                <div class="hint">Runs once at first boot. Leave blank for no user data.</div>
+
                 <button type="submit">Launch</button>
             </form>
         </div>

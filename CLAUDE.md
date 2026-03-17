@@ -50,7 +50,8 @@ Two components:
 - Before each apply, existing VMs are read via `terraform show -json` (not `terraform output -json` — outputs are cached and go stale after `terraform state rm`). New VMs are checked for name and VMID conflicts, then merged into the var file so prior VMs are never destroyed by a new launch.
 - A `terraform apply -refresh-only` pass runs after provisioning to discover DHCP-assigned IPs.
 - Terminate uses `terraform apply -destroy -target=...` for single-VM deletion. Requires typing the VM name; protected VMs additionally require typing `"destroy protected instance"`.
-- Start/Stop use direct Proxmox API calls (not Terraform) for speed. Stop sends an ACPI shutdown signal (graceful). VM power state is fetched in parallel for all instances on every page load.
+- Start/Stop use direct Proxmox API calls (not Terraform) for speed. Stop sends a graceful ACPI shutdown with `forceStop=1` fallback. VM power state is fetched in parallel for all instances on every page load.
+- User data (cloud-init) is optional. If provided, the portal uploads it as a snippet to `proxmox-nas` via the Proxmox API before calling Terraform, then passes the file ID (`proxmox-nas:snippets/<filename>`) as `user_data_file_id`. Snippet files are named `portal-<nameprefix>-<vmcount>.yaml` and are not auto-deleted on terminate.
 - Terraform state lives in `infra/terraform.tfstate` (not remote).
 
 ## Tests

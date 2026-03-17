@@ -77,3 +77,9 @@ variable "full_clone" {
   type        = bool
   default     = false
 }
+
+variable "user_data_file_id" {
+  description = "Snippets file ID for cloud-init user data, e.g. proxmox-nas:snippets/user-data.yaml. Empty string means no user data."
+  type        = string
+  default     = ""
+}
