@@ -32,6 +32,8 @@ resource "proxmox_virtual_environment_vm" "vm" {
   node_name = var.node_name
   vm_id     = each.value
 
+  stop_on_destroy = true
+
   clone {
     vm_id = var.template_vmid
     full  = var.full_clone

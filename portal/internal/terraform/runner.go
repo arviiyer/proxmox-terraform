@@ -32,6 +32,12 @@ func (r Runner) RefreshOnly(ctx context.Context, varFile string) (string, error)
 	return out, err
 }
 
+// Destroy removes a single resource by Terraform address.
+func (r Runner) Destroy(ctx context.Context, target, varFile string) (string, error) {
+	return r.runCombined(ctx, "apply", "-destroy", "-auto-approve", "-input=false",
+		"-target", target, "-var-file", varFile)
+}
+
 // OutputJSON returns `terraform output -json` parsed.
 func (r Runner) OutputJSON(ctx context.Context) (map[string]any, error) {
 	out, err := r.runCapture(ctx, "output", "-json")
@@ -41,6 +47,21 @@ func (r Runner) OutputJSON(ctx context.Context) (map[string]any, error) {
 	var m map[string]any
 	if err := json.Unmarshal(out, &m); err != nil {
 		return nil, fmt.Errorf("parse terraform output json: %w", err)
+	}
+	return m, nil
+}
+
+// ShowJSON returns `terraform show -json` parsed. Unlike OutputJSON, this
+// reads actual resource state rather than cached output values, so it remains
+// accurate after terraform state rm operations.
+func (r Runner) ShowJSON(ctx context.Context) (map[string]any, error) {
+	out, err := r.runCapture(ctx, "show", "-json")
+	if err != nil {
+		return nil, err
+	}
+	var m map[string]any
+	if err := json.Unmarshal(out, &m); err != nil {
+		return nil, fmt.Errorf("parse terraform show json: %w", err)
 	}
 	return m, nil
 }

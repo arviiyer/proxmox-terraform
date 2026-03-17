@@ -56,6 +56,50 @@
                 font-weight: 600;
                 background: #f5f5f5;
             }
+            .btn {
+                margin-top: 0;
+                padding: 4px 10px;
+                font-size: 13px;
+                cursor: pointer;
+            }
+            .btn-danger {
+                background: #fff0f0;
+                border: 1px solid #f99;
+                color: #b00020;
+            }
+            .btn-lock {
+                background: none;
+                border: 1px solid #ddd;
+            }
+            dialog {
+                border: 1px solid #ddd;
+                border-radius: 10px;
+                padding: 24px;
+                min-width: 360px;
+            }
+            dialog::backdrop {
+                background: rgba(0,0,0,0.3);
+            }
+            dialog h3 {
+                margin-top: 0;
+            }
+            dialog input {
+                width: 100%;
+                padding: 8px;
+                margin-top: 6px;
+                box-sizing: border-box;
+            }
+            dialog .actions {
+                display: flex;
+                gap: 8px;
+                justify-content: flex-end;
+                margin-top: 16px;
+            }
+            .protected-badge {
+                font-size: 12px;
+                color: #888;
+                margin-left: 6px;
+            }
         </style>
     </head>
     <body>
@@ -68,15 +112,30 @@
                     <th>VMID</th>
                     <th>Node</th>
                     <th>IP</th>
+                    <th></th>
                 </tr>
             </thead>
             <tbody>
                 {{range .instances}}
+                {{$protected := index $.protected .Name}}
                 <tr>
-                    <td>{{.Name}}</td>
+                    <td>
+                        {{.Name}}
+                        {{if $protected}}<span class="protected-badge">🔒 protected</span>{{end}}
+                    </td>
                     <td>{{.VMID}}</td>
                     <td>{{.Node}}</td>
                     <td>{{if .PrivateIP}}{{.PrivateIP}}{{else}}—{{end}}</td>
+                    <td style="white-space:nowrap">
+                        <form method="POST" action="/toggle-protection" style="display:inline">
+                            <input type="hidden" name="name" value="{{.Name}}" />
+                            <button class="btn btn-lock" type="submit">{{if $protected}}🔓 Unprotect{{else}}🔒 Protect{{end}}</button>
+                        </form>
+                        <button class="btn btn-danger"
+                            onclick="openDestroyModal('{{.Name}}', {{if $protected}}true{{else}}false{{end}})">
+                            Terminate
+                        </button>
+                    </td>
                 </tr>
                 {{end}}
             </tbody>
@@ -84,6 +143,66 @@
         {{else}}
         <p class="hint">No instances.</p>
         {{end}}
+
+        <dialog id="destroy-modal">
+            <h3>Terminate instance</h3>
+            <p id="modal-desc"></p>
+            <label>Type the instance name to confirm:
+                <input id="modal-confirm" type="text" autocomplete="off" />
+            </label>
+            <div id="override-section" style="display:none">
+                <p style="color:#b00020;margin-top:12px">
+                    ⚠️ This instance is protected. Type <strong>destroy protected instance</strong> to proceed.
+                </p>
+                <label>
+                    <input id="modal-override" type="text" autocomplete="off" />
+                </label>
+            </div>
+            <div class="actions">
+                <button class="btn" onclick="document.getElementById('destroy-modal').close()">Cancel</button>
+                <button class="btn btn-danger" onclick="submitDestroy()">Terminate</button>
+            </div>
+        </dialog>
+
+        <form id="destroy-form" method="POST" action="/destroy" style="display:none">
+            <input type="hidden" name="name" id="df-name" />
+            <input type="hidden" name="confirm" id="df-confirm" />
+            <input type="hidden" name="override_confirm" id="df-override" />
+        </form>
+
+        <script>
+            let _destroyName = '';
+            let _destroyProtected = false;
+
+            function openDestroyModal(name, isProtected) {
+                _destroyName = name;
+                _destroyProtected = isProtected;
+                document.getElementById('modal-desc').textContent = 'Instance: ' + name;
+                document.getElementById('modal-confirm').value = '';
+                document.getElementById('modal-override').value = '';
+                document.getElementById('override-section').style.display = isProtected ? 'block' : 'none';
+                document.getElementById('destroy-modal').showModal();
+            }
+
+            function submitDestroy() {
+                const confirm = document.getElementById('modal-confirm').value;
+                if (confirm !== _destroyName) {
+                    alert('Instance name does not match.');
+                    return;
+                }
+                if (_destroyProtected) {
+                    const override = document.getElementById('modal-override').value;
+                    if (override !== 'destroy protected instance') {
+                        alert('Override phrase does not match.');
+                        return;
+                    }
+                    document.getElementById('df-override').value = override;
+                }
+                document.getElementById('df-name').value = _destroyName;
+                document.getElementById('df-confirm').value = confirm;
+                document.getElementById('destroy-form').submit();
+            }
+        </script>
 
         <h2>Launch</h2>
         <div class="card">

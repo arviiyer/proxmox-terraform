@@ -4,43 +4,53 @@ import (
 	"testing"
 )
 
-func TestExtractVMsFromOutput(t *testing.T) {
+// buildShowJSON builds a terraform show -json structure for testing.
+func buildShowJSON(vms []map[string]any) map[string]any {
+	resources := make([]any, 0, len(vms))
+	for _, vm := range vms {
+		resources = append(resources, map[string]any{
+			"type":   "proxmox_virtual_environment_vm",
+			"values": vm,
+		})
+	}
+	return map[string]any{
+		"values": map[string]any{
+			"root_module": map[string]any{
+				"resources": resources,
+			},
+		},
+	}
+}
+
+func TestExtractVMsFromShow(t *testing.T) {
 	tests := []struct {
 		name string
-		out  map[string]any
+		show map[string]any
 		want map[string]int
 	}{
 		{
-			name: "normal output",
-			out: map[string]any{
-				"instances": map[string]any{
-					"value": []any{
-						map[string]any{"name": "vm-01", "vm_id": float64(200), "node": "summerset", "private_ip": "10.0.0.1"},
-						map[string]any{"name": "vm-02", "vm_id": float64(201), "node": "summerset", "private_ip": nil},
-					},
-				},
-			},
+			name: "normal state",
+			show: buildShowJSON([]map[string]any{
+				{"name": "vm-01", "vm_id": float64(200), "node_name": "summerset", "ipv4_addresses": []any{}},
+				{"name": "vm-02", "vm_id": float64(201), "node_name": "summerset", "ipv4_addresses": []any{}},
+			}),
 			want: map[string]int{"vm-01": 200, "vm-02": 201},
 		},
 		{
-			name: "empty instances",
-			out: map[string]any{
-				"instances": map[string]any{
-					"value": []any{},
-				},
-			},
+			name: "empty state",
+			show: buildShowJSON([]map[string]any{}),
 			want: map[string]int{},
 		},
 		{
-			name: "missing instances key (fresh state)",
-			out:  map[string]any{},
+			name: "missing values key (fresh state)",
+			show: map[string]any{},
 			want: map[string]int{},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := extractVMsFromOutput(tt.out)
+			got := extractVMsFromShow(tt.show)
 			if len(got) != len(tt.want) {
 				t.Fatalf("got %d entries, want %d: %v", len(got), len(tt.want), got)
 			}
@@ -50,6 +60,37 @@ func TestExtractVMsFromOutput(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestParseInstancesFromShow(t *testing.T) {
+	show := buildShowJSON([]map[string]any{
+		{
+			"name":      "vm-01",
+			"vm_id":     float64(200),
+			"node_name": "summerset",
+			"ipv4_addresses": []any{
+				[]any{"127.0.0.1"},       // loopback, should be skipped
+				[]any{"10.0.0.5"},        // match
+			},
+		},
+		{
+			"name":           "vm-02",
+			"vm_id":          float64(201),
+			"node_name":      "summerset",
+			"ipv4_addresses": []any{},
+		},
+	})
+
+	instances := parseInstancesFromShow(show)
+	if len(instances) != 2 {
+		t.Fatalf("got %d instances, want 2", len(instances))
+	}
+	if instances[0].Name != "vm-01" || instances[0].VMID != 200 || instances[0].PrivateIP != "10.0.0.5" {
+		t.Errorf("unexpected instance[0]: %+v", instances[0])
+	}
+	if instances[1].Name != "vm-02" || instances[1].PrivateIP != "" {
+		t.Errorf("unexpected instance[1]: %+v", instances[1])
 	}
 }
 
@@ -111,7 +152,6 @@ func TestMergeVMs(t *testing.T) {
 			if len(got) != tt.wantLen {
 				t.Errorf("got %d entries, want %d: %v", len(got), tt.wantLen, got)
 			}
-			// Verify all existing and incoming keys are present
 			for k, v := range tt.existing {
 				if got[k] != v {
 					t.Errorf("existing key %q: got %d, want %d", k, got[k], v)

@@ -58,13 +58,16 @@ type Instance struct {
 	PrivateIP string
 }
 
+const protectedConfirmPhrase = "destroy protected instance"
+
 var (
-	cfg          Config
-	tmpl         *template.Template
-	applyLock    sync.Mutex // prevent concurrent applies against same local state
-	sshPublicKey string
-	pveEndpoint  string
-	pveAPIToken  string
+	cfg           Config
+	tmpl          *template.Template
+	applyLock     sync.Mutex // prevent concurrent applies against same local state
+	sshPublicKey  string
+	pveEndpoint   string
+	pveAPIToken   string
+	protectedLock sync.Mutex
 )
 
 func main() {
@@ -98,6 +101,8 @@ func main() {
 
 	http.HandleFunc("/", handleIndex)
 	http.HandleFunc("/launch", handleLaunch)
+	http.HandleFunc("/destroy", handleDestroy)
+	http.HandleFunc("/toggle-protection", handleToggleProtection)
 	http.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200); w.Write([]byte("ok")) })
 
 	addr := ":8088"
@@ -115,8 +120,8 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 	runner := tf.Runner{Dir: cfg.TerraformDir}
 	ctx, cancel := tf.DefaultTimeoutCtx()
 	defer cancel()
-	if out, err := runner.OutputJSON(ctx); err == nil {
-		instances = parseInstances(out)
+	if show, err := runner.ShowJSON(ctx); err == nil {
+		instances = parseInstancesFromShow(show)
 	}
 
 	data := map[string]any{
@@ -124,6 +129,7 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 		"instanceTypes": cfg.AllowedInstanceTypes,
 		"defaults":      cfg.Defaults,
 		"instances":     instances,
+		"protected":     loadProtected(),
 	}
 	_ = tmpl.ExecuteTemplate(w, "index.html", data)
 }
@@ -183,8 +189,8 @@ func handleLaunch(w http.ResponseWriter, r *http.Request) {
 
 	// Read existing state so we can merge rather than replace
 	existingVMs := map[string]int{}
-	if existing, err := runner.OutputJSON(ctx); err == nil {
-		existingVMs = extractVMsFromOutput(existing)
+	if show, err := runner.ShowJSON(ctx); err == nil {
+		existingVMs = extractVMsFromShow(show)
 	}
 
 	// Build new vms map: name -> vmid
@@ -328,38 +334,193 @@ func mergeVMs(existing, incoming map[string]int) (map[string]int, error) {
 	return merged, nil
 }
 
-// parseInstances extracts the full instance list from terraform output JSON.
-func parseInstances(out map[string]any) []Instance {
-	meta, _ := out["instances"].(map[string]any)
-	items, _ := meta["value"].([]any)
-	result := make([]Instance, 0, len(items))
-	for _, item := range items {
-		m, _ := item.(map[string]any)
-		name, _ := m["name"].(string)
-		vmidF, _ := m["vm_id"].(float64)
-		node, _ := m["node"].(string)
-		ip, _ := m["private_ip"].(string)
-		if name != "" {
-			result = append(result, Instance{
-				Name:      name,
-				VMID:      int(vmidF),
-				Node:      node,
-				PrivateIP: ip,
-			})
+// showResources returns all proxmox VM resource values from terraform show -json.
+func showResources(show map[string]any) []map[string]any {
+	values, _ := show["values"].(map[string]any)
+	root, _ := values["root_module"].(map[string]any)
+	resources, _ := root["resources"].([]any)
+	var result []map[string]any
+	for _, r := range resources {
+		rm, _ := r.(map[string]any)
+		if rm["type"] == "proxmox_virtual_environment_vm" {
+			result = append(result, rm)
 		}
 	}
 	return result
 }
 
-// extractVMsFromOutput rebuilds a name->vmid map from terraform output JSON.
-func extractVMsFromOutput(out map[string]any) map[string]int {
+// parseInstancesFromShow extracts the full instance list from terraform show -json.
+func parseInstancesFromShow(show map[string]any) []Instance {
+	var result []Instance
+	for _, r := range showResources(show) {
+		vals, _ := r["values"].(map[string]any)
+		name, _ := vals["name"].(string)
+		vmidF, _ := vals["vm_id"].(float64)
+		node, _ := vals["node_name"].(string)
+		if name == "" {
+			continue
+		}
+		result = append(result, Instance{
+			Name:      name,
+			VMID:      int(vmidF),
+			Node:      node,
+			PrivateIP: extractIPFromShow(vals),
+		})
+	}
+	return result
+}
+
+// extractIPFromShow finds the first 10.x IP from ipv4_addresses in show output.
+func extractIPFromShow(vals map[string]any) string {
+	addrs, _ := vals["ipv4_addresses"].([]any)
+	for _, iface := range addrs {
+		ips, _ := iface.([]any)
+		for _, ip := range ips {
+			if s, _ := ip.(string); strings.HasPrefix(s, "10.") {
+				return s
+			}
+		}
+	}
+	return ""
+}
+
+// handleDestroy destroys a single VM by name after confirmation.
+func handleDestroy(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", 405)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "bad form", 400)
+		return
+	}
+
+	name := strings.TrimSpace(r.FormValue("name"))
+	confirm := r.FormValue("confirm")
+	overrideConfirm := r.FormValue("override_confirm")
+
+	if name == "" {
+		http.Error(w, "name required", 400)
+		return
+	}
+	if confirm != name {
+		http.Error(w, "confirmation does not match instance name", 400)
+		return
+	}
+
+	protected := loadProtected()
+	if protected[name] && overrideConfirm != protectedConfirmPhrase {
+		http.Error(w, fmt.Sprintf("instance is protected; type %q to proceed", protectedConfirmPhrase), 400)
+		return
+	}
+
+	applyLock.Lock()
+	defer applyLock.Unlock()
+
+	runner := tf.Runner{Dir: cfg.TerraformDir}
+	ctx, cancel := tf.DefaultTimeoutCtx()
+	defer cancel()
+
+	// Build var file with current state so credentials are present.
+	existingVMs := map[string]int{}
+	if show, err := runner.ShowJSON(ctx); err == nil {
+		existingVMs = extractVMsFromShow(show)
+	}
+	varPayload := map[string]any{
+		"vms":            existingVMs,
+		"template_vmid":  cfg.AllowedTemplates[0].VMID,
+		"instance_type":  cfg.Defaults.InstanceType,
+		"full_clone":     cfg.Defaults.FullClone,
+		"node_name":      cfg.Defaults.NodeName,
+		"bridge":         cfg.Defaults.Bridge,
+		"ci_user":        cfg.Defaults.CIUser,
+		"ci_datastore":   cfg.Defaults.CIDatastore,
+		"ssh_public_key": sshPublicKey,
+		"pve_endpoint":   pveEndpoint,
+		"pve_api_token":  pveAPIToken,
+	}
+	varFile, err := tf.WriteVarFileJSON(cfg.TerraformDir, varPayload)
+	if err != nil {
+		renderResult(w, Result{Error: err.Error()})
+		return
+	}
+
+	target := fmt.Sprintf("proxmox_virtual_environment_vm.vm[%q]", name)
+	logs, err := runner.Destroy(ctx, target, varFile)
+	logs = stripANSI(logs)
+	if err != nil {
+		renderResult(w, Result{Logs: logs, Error: err.Error()})
+		return
+	}
+
+	renderResult(w, Result{Logs: logs})
+}
+
+// handleToggleProtection adds or removes a VM from the protected list.
+func handleToggleProtection(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", 405)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "bad form", 400)
+		return
+	}
+
+	name := strings.TrimSpace(r.FormValue("name"))
+	if name == "" {
+		http.Error(w, "name required", 400)
+		return
+	}
+
+	protectedLock.Lock()
+	protected := loadProtected()
+	if protected[name] {
+		delete(protected, name)
+	} else {
+		protected[name] = true
+	}
+	saveProtected(protected)
+	protectedLock.Unlock()
+
+	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
+// loadProtected reads protected.json and returns a set of protected VM names.
+// Returns an empty map if the file does not exist.
+func loadProtected() map[string]bool {
+	b, err := os.ReadFile("protected.json")
+	if err != nil {
+		return map[string]bool{}
+	}
+	var names []string
+	if err := json.Unmarshal(b, &names); err != nil {
+		return map[string]bool{}
+	}
+	set := make(map[string]bool, len(names))
+	for _, n := range names {
+		set[n] = true
+	}
+	return set
+}
+
+// saveProtected writes the protected set to protected.json.
+func saveProtected(protected map[string]bool) {
+	names := make([]string, 0, len(protected))
+	for n := range protected {
+		names = append(names, n)
+	}
+	b, _ := json.MarshalIndent(names, "", "  ")
+	_ = os.WriteFile("protected.json", b, 0o600)
+}
+
+// extractVMsFromShow rebuilds a name->vmid map from terraform show -json.
+func extractVMsFromShow(show map[string]any) map[string]int {
 	result := map[string]int{}
-	meta, _ := out["instances"].(map[string]any)
-	items, _ := meta["value"].([]any)
-	for _, item := range items {
-		m, _ := item.(map[string]any)
-		name, _ := m["name"].(string)
-		vmidF, _ := m["vm_id"].(float64)
+	for _, r := range showResources(show) {
+		vals, _ := r["values"].(map[string]any)
+		name, _ := vals["name"].(string)
+		vmidF, _ := vals["vm_id"].(float64)
 		if name != "" {
 			result[name] = int(vmidF)
 		}
