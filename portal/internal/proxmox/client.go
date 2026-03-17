@@ -1,12 +1,10 @@
 package proxmox
 
 import (
-	"bytes"
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
-	"mime/multipart"
 	"net/http"
 	"strings"
 	"time"
@@ -62,44 +60,6 @@ func (c *Client) StartVM(node string, vmid int) error {
 func (c *Client) StopVM(node string, vmid int) error {
 	url := fmt.Sprintf("%s/api2/json/nodes/%s/qemu/%d/status/shutdown", c.endpoint, node, vmid)
 	return c.post(url, "forceStop=1")
-}
-
-// UploadSnippet uploads content as a snippets file to the given storage on node.
-// Returns the file ID in the format "storage:snippets/filename" ready for use
-// as user_data_file_id in Terraform.
-func (c *Client) UploadSnippet(node, storage, filename, content string) (string, error) {
-	var buf bytes.Buffer
-	w := multipart.NewWriter(&buf)
-	if err := w.WriteField("content", "snippets"); err != nil {
-		return "", err
-	}
-	fw, err := w.CreateFormFile("file", filename)
-	if err != nil {
-		return "", err
-	}
-	if _, err := io.WriteString(fw, content); err != nil {
-		return "", err
-	}
-	w.Close()
-
-	url := fmt.Sprintf("%s/api2/json/nodes/%s/storage/%s/upload", c.endpoint, node, storage)
-	req, err := http.NewRequest(http.MethodPost, url, &buf)
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Authorization", "PVEAPIToken="+c.apiToken)
-	req.Header.Set("Content-Type", w.FormDataContentType())
-
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode >= 400 {
-		return "", fmt.Errorf("proxmox API %s: %s", resp.Status, body)
-	}
-	return fmt.Sprintf("%s:snippets/%s", storage, filename), nil
 }
 
 func (c *Client) get(url string) ([]byte, error) {

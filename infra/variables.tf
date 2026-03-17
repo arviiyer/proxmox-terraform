@@ -78,8 +78,14 @@ variable "full_clone" {
   default     = false
 }
 
-variable "user_data_file_id" {
-  description = "Snippets file ID for cloud-init user data, e.g. proxmox-nas:snippets/user-data.yaml. Empty string means no user data."
+variable "user_data" {
+  description = "Raw cloud-init user data content. Empty string means no user data."
   type        = string
   default     = ""
+}
+
+variable "snippets_storage" {
+  description = "Proxmox storage ID to upload user data snippets to. Must have snippets content type enabled."
+  type        = string
+  default     = "proxmox-nas"
 }

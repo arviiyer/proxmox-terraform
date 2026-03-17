@@ -244,26 +244,15 @@ func handleLaunch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Upload user data snippet if provided.
-	userDataFileID := ""
-	if form.UserData != "" {
-		filename := fmt.Sprintf("portal-%s-%d.yaml", form.NamePrefix, len(vms))
-		fileID, err := pveClient.UploadSnippet(cfg.Defaults.NodeName, cfg.Defaults.SnippetsStorage, filename, form.UserData)
-		if err != nil {
-			renderResult(w, Result{Error: fmt.Sprintf("upload user data: %v", err)})
-			return
-		}
-		userDataFileID = fileID
-	}
-
 	// Create var-file payload matching Terraform variables
 	varPayload := map[string]any{
-		"template_vmid":     form.TemplateVMID,
-		"template_node":     cfg.Defaults.TemplateNode,
-		"instance_type":     form.InstanceType,
-		"full_clone":        form.FullClone,
-		"vms":               vms,
-		"user_data_file_id": userDataFileID,
+		"template_vmid":    form.TemplateVMID,
+		"template_node":    cfg.Defaults.TemplateNode,
+		"instance_type":    form.InstanceType,
+		"full_clone":       form.FullClone,
+		"vms":              vms,
+		"user_data":        form.UserData,
+		"snippets_storage": cfg.Defaults.SnippetsStorage,
 
 		"bridge":         cfg.Defaults.Bridge,
 		"ci_user":        cfg.Defaults.CIUser,
@@ -488,18 +477,19 @@ func handleDestroy(w http.ResponseWriter, r *http.Request) {
 		existingVMs = extractVMsFromShow(show)
 	}
 	varPayload := map[string]any{
-		"vms":               existingVMs,
-		"template_vmid":     cfg.AllowedTemplates[0].VMID,
-		"template_node":     cfg.Defaults.TemplateNode,
-		"instance_type":     cfg.Defaults.InstanceType,
-		"full_clone":        cfg.Defaults.FullClone,
-		"user_data_file_id": "",
-		"bridge":            cfg.Defaults.Bridge,
-		"ci_user":           cfg.Defaults.CIUser,
-		"ci_datastore":      cfg.Defaults.CIDatastore,
-		"ssh_public_key":    sshPublicKey,
-		"pve_endpoint":      pveEndpoint,
-		"pve_api_token":     pveAPIToken,
+		"vms":              existingVMs,
+		"template_vmid":    cfg.AllowedTemplates[0].VMID,
+		"template_node":    cfg.Defaults.TemplateNode,
+		"instance_type":    cfg.Defaults.InstanceType,
+		"full_clone":       cfg.Defaults.FullClone,
+		"user_data":        "",
+		"snippets_storage": cfg.Defaults.SnippetsStorage,
+		"bridge":           cfg.Defaults.Bridge,
+		"ci_user":          cfg.Defaults.CIUser,
+		"ci_datastore":     cfg.Defaults.CIDatastore,
+		"ssh_public_key":   sshPublicKey,
+		"pve_endpoint":     pveEndpoint,
+		"pve_api_token":    pveAPIToken,
 	}
 	varFile, err := tf.WriteVarFileJSON(cfg.TerraformDir, varPayload)
 	if err != nil {

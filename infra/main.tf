@@ -24,6 +24,18 @@ locals {
   f = lookup(local.flavors, var.instance_type, local.flavors["general-small"])
 }
 
+resource "proxmox_virtual_environment_file" "user_data" {
+  count        = var.user_data != "" ? 1 : 0
+  content_type = "snippets"
+  datastore_id = var.snippets_storage
+  node_name    = var.template_node
+
+  source_raw {
+    data      = var.user_data
+    file_name = "portal-user-data.yaml"
+  }
+}
+
 resource "proxmox_virtual_environment_vm" "vm" {
 
   for_each = var.vms
@@ -59,9 +71,13 @@ resource "proxmox_virtual_environment_vm" "vm" {
     size         = local.f.disk
   }
 
+  lifecycle {
+    ignore_changes = [initialization]
+  }
+
   initialization {
     datastore_id      = var.ci_datastore
-    user_data_file_id = var.user_data_file_id != "" ? var.user_data_file_id : null
+    user_data_file_id = length(proxmox_virtual_environment_file.user_data) > 0 ? proxmox_virtual_environment_file.user_data[0].id : null
 
     user_account {
       username = var.ci_user
