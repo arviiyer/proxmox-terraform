@@ -1,8 +1,178 @@
 package main
 
 import (
+	"net/http"
+	"net/url"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 )
+
+func TestStripANSI(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"color code", "\x1b[32mgreen\x1b[0m", "green"},
+		{"bold", "\x1b[1mbold\x1b[0m", "bold"},
+		{"erase line", "foo\x1b[2Kbar", "foobar"},
+		{"cursor up", "foo\x1b[Abar", "foobar"},
+		{"no escapes", "plain text", "plain text"},
+		{"mixed", "\x1b[1;32mok\x1b[0m normal \x1b[2K", "ok normal "},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := stripANSI(tt.input); got != tt.want {
+				t.Errorf("got %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseLaunchForm(t *testing.T) {
+	makeRequest := func(vals map[string]string) *http.Request {
+		form := url.Values{}
+		for k, v := range vals {
+			form.Set(k, v)
+		}
+		r, _ := http.NewRequest(http.MethodPost, "/launch", strings.NewReader(form.Encode()))
+		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		return r
+	}
+
+	valid := map[string]string{
+		"template_vmid": "8000",
+		"instance_type": "general-small",
+		"count":         "2",
+		"vmid_start":    "200",
+		"name_prefix":   "vm",
+		"full_clone":    "on",
+	}
+
+	t.Run("valid form", func(t *testing.T) {
+		r := makeRequest(valid)
+		r.ParseForm()
+		f, err := parseLaunchForm(r)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if f.TemplateVMID != 8000 || f.Count != 2 || f.VMIDStart != 200 || !f.FullClone {
+			t.Errorf("unexpected form values: %+v", f)
+		}
+	})
+
+	t.Run("invalid template_vmid", func(t *testing.T) {
+		m := copyMap(valid)
+		m["template_vmid"] = "abc"
+		r := makeRequest(m)
+		r.ParseForm()
+		_, err := parseLaunchForm(r)
+		if err == nil || !strings.Contains(err.Error(), "template_vmid") {
+			t.Errorf("expected template_vmid error, got %v", err)
+		}
+	})
+
+	t.Run("invalid count", func(t *testing.T) {
+		m := copyMap(valid)
+		m["count"] = "xyz"
+		r := makeRequest(m)
+		r.ParseForm()
+		_, err := parseLaunchForm(r)
+		if err == nil || !strings.Contains(err.Error(), "count") {
+			t.Errorf("expected count error, got %v", err)
+		}
+	})
+
+	t.Run("invalid vmid_start", func(t *testing.T) {
+		m := copyMap(valid)
+		m["vmid_start"] = "bad"
+		r := makeRequest(m)
+		r.ParseForm()
+		_, err := parseLaunchForm(r)
+		if err == nil || !strings.Contains(err.Error(), "vmid_start") {
+			t.Errorf("expected vmid_start error, got %v", err)
+		}
+	})
+
+	t.Run("full_clone off when not set", func(t *testing.T) {
+		m := copyMap(valid)
+		delete(m, "full_clone")
+		r := makeRequest(m)
+		r.ParseForm()
+		f, err := parseLaunchForm(r)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if f.FullClone {
+			t.Error("expected FullClone=false when checkbox absent")
+		}
+	})
+}
+
+func TestLoadSaveProtected(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "protected.json")
+
+	t.Run("missing file returns empty map", func(t *testing.T) {
+		// point loadProtected at a non-existent file by cd-ing... instead
+		// call the helpers directly with a temp path via the OS
+		orig, _ := os.Getwd()
+		os.Chdir(dir)
+		defer os.Chdir(orig)
+
+		got := loadProtected()
+		if len(got) != 0 {
+			t.Errorf("expected empty map, got %v", got)
+		}
+	})
+
+	t.Run("save and reload", func(t *testing.T) {
+		orig, _ := os.Getwd()
+		os.Chdir(dir)
+		defer os.Chdir(orig)
+
+		saveProtected(map[string]bool{"vm-01": true, "vm-02": true})
+		got := loadProtected()
+		if !got["vm-01"] || !got["vm-02"] || len(got) != 2 {
+			t.Errorf("unexpected protected set: %v", got)
+		}
+		_ = path // suppress unused warning
+	})
+
+	t.Run("toggle adds then removes", func(t *testing.T) {
+		orig, _ := os.Getwd()
+		os.Chdir(dir)
+		defer os.Chdir(orig)
+
+		saveProtected(map[string]bool{})
+
+		// add
+		p := loadProtected()
+		p["vm-01"] = true
+		saveProtected(p)
+		if got := loadProtected(); !got["vm-01"] {
+			t.Error("expected vm-01 to be protected")
+		}
+
+		// remove
+		p = loadProtected()
+		delete(p, "vm-01")
+		saveProtected(p)
+		if got := loadProtected(); got["vm-01"] {
+			t.Error("expected vm-01 to be unprotected")
+		}
+	})
+}
+
+func copyMap(m map[string]string) map[string]string {
+	out := make(map[string]string, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
+}
 
 // buildShowJSON builds a terraform show -json structure for testing.
 func buildShowJSON(vms []map[string]any) map[string]any {
