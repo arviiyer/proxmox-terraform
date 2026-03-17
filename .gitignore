@@ -27,6 +27,9 @@ crash.*.log
 *.exe
 *.out
 
+### Secrets ###
+.env
+
 ### Editors / OS ###
 .vscode/
 .idea/
