@@ -29,14 +29,15 @@ resource "proxmox_virtual_environment_vm" "vm" {
   for_each = var.vms
 
   name      = each.key
-  node_name = var.node_name
-  vm_id     = each.value
+  node_name = each.value.node
+  vm_id     = each.value.vmid
 
   stop_on_destroy = true
 
   clone {
-    vm_id = var.template_vmid
-    full  = var.full_clone
+    vm_id     = var.template_vmid
+    node_name = var.template_node
+    full      = var.full_clone
   }
 
   cpu {

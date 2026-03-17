@@ -112,6 +112,7 @@
                     <th>VMID</th>
                     <th>Node</th>
                     <th>IP</th>
+                    <th>Status</th>
                     <th></th>
                 </tr>
             </thead>
@@ -126,7 +127,19 @@
                     <td>{{.VMID}}</td>
                     <td>{{.Node}}</td>
                     <td>{{if .PrivateIP}}{{.PrivateIP}}{{else}}—{{end}}</td>
+                    <td>{{if .Status}}{{.Status}}{{else}}—{{end}}</td>
                     <td style="white-space:nowrap">
+                        {{if eq .Status "stopped"}}
+                        <form method="POST" action="/start" style="display:inline">
+                            <input type="hidden" name="name" value="{{.Name}}" />
+                            <button class="btn" type="submit">▶ Start</button>
+                        </form>
+                        {{else if eq .Status "running"}}
+                        <form method="POST" action="/stop" style="display:inline">
+                            <input type="hidden" name="name" value="{{.Name}}" />
+                            <button class="btn" type="submit">⏹ Stop</button>
+                        </form>
+                        {{end}}
                         <form method="POST" action="/toggle-protection" style="display:inline">
                             <input type="hidden" name="name" value="{{.Name}}" />
                             <button class="btn btn-lock" type="submit">{{if $protected}}🔓 Unprotect{{else}}🔒 Protect{{end}}</button>
@@ -213,6 +226,13 @@
                     <option value="{{.VMID}}">
                         {{.Name}} (VMID {{.VMID}})
                     </option>
+                    {{end}}
+                </select>
+
+                <label>Node</label>
+                <select name="node" required>
+                    {{range .nodes}}
+                    <option value="{{.}}" {{if eq . $.defaults.NodeName}}selected{{end}}>{{.}}</option>
                     {{end}}
                 </select>
 

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 
+	pve "github.com/arviiyer/proxmox-terraform/portal/internal/proxmox"
 	tf "github.com/arviiyer/proxmox-terraform/portal/internal/terraform"
 )
 
@@ -20,7 +21,8 @@ import (
 var templatesFS embed.FS
 
 type Config struct {
-	TerraformDir     string `json:"terraform_dir"`
+	TerraformDir     string   `json:"terraform_dir"`
+	AllowedNodes     []string `json:"allowed_nodes"`
 	AllowedTemplates []struct {
 		Name string `json:"name"`
 		VMID int    `json:"vmid"`
@@ -28,6 +30,7 @@ type Config struct {
 	AllowedInstanceTypes []string `json:"allowed_instance_types"`
 	Defaults             struct {
 		NodeName     string `json:"node_name"`
+		TemplateNode string `json:"template_node"`
 		Bridge       string `json:"bridge"`
 		CIUser       string `json:"ci_user"`
 		CIDatastore  string `json:"ci_datastore"`
@@ -36,9 +39,16 @@ type Config struct {
 	} `json:"defaults"`
 }
 
+// VMEntry is the per-VM configuration passed to Terraform.
+type VMEntry struct {
+	VMID int    `json:"vmid"`
+	Node string `json:"node"`
+}
+
 type LaunchForm struct {
 	TemplateVMID int
 	InstanceType string
+	Node         string
 	Count        int
 	NamePrefix   string
 	VMIDStart    int
@@ -56,6 +66,7 @@ type Instance struct {
 	VMID      int
 	Node      string
 	PrivateIP string
+	Status    string // "running", "stopped", or "" if unknown
 }
 
 const protectedConfirmPhrase = "destroy protected instance"
@@ -68,6 +79,7 @@ var (
 	pveEndpoint   string
 	pveAPIToken   string
 	protectedLock sync.Mutex
+	pveClient     *pve.Client
 )
 
 func main() {
@@ -93,6 +105,8 @@ func main() {
 		log.Fatal("PVE_API_TOKEN env var is required")
 	}
 
+	pveClient = pve.New(pveEndpoint, pveAPIToken)
+
 	tmpl = template.Must(template.ParseFS(
 		templatesFS,
 		"web/templates/index.html",
@@ -102,6 +116,8 @@ func main() {
 	http.HandleFunc("/", handleIndex)
 	http.HandleFunc("/launch", handleLaunch)
 	http.HandleFunc("/destroy", handleDestroy)
+	http.HandleFunc("/start", handleStart)
+	http.HandleFunc("/stop", handleStop)
 	http.HandleFunc("/toggle-protection", handleToggleProtection)
 	http.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200); w.Write([]byte("ok")) })
 
@@ -124,9 +140,24 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 		instances = parseInstancesFromShow(show)
 	}
 
+	// Fetch VM power states in parallel — best effort, unknown on error.
+	var wg sync.WaitGroup
+	for i := range instances {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			status, err := pveClient.VMStatus(instances[i].Node, instances[i].VMID)
+			if err == nil {
+				instances[i].Status = status
+			}
+		}(i)
+	}
+	wg.Wait()
+
 	data := map[string]any{
 		"templates":     cfg.AllowedTemplates,
 		"instanceTypes": cfg.AllowedInstanceTypes,
+		"nodes":         cfg.AllowedNodes,
 		"defaults":      cfg.Defaults,
 		"instances":     instances,
 		"protected":     loadProtected(),
@@ -151,13 +182,17 @@ func handleLaunch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Guardrails: allowlist template + instance types
+	// Guardrails: allowlist template, instance type, node
 	if !isAllowedTemplate(form.TemplateVMID) {
 		http.Error(w, "template not allowed", 400)
 		return
 	}
 	if !isAllowedInstanceType(form.InstanceType) {
 		http.Error(w, "instance type not allowed", 400)
+		return
+	}
+	if !isAllowedNode(form.Node) {
+		http.Error(w, "node not allowed", 400)
 		return
 	}
 	if form.Count < 1 || form.Count > 50 {
@@ -188,16 +223,16 @@ func handleLaunch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Read existing state so we can merge rather than replace
-	existingVMs := map[string]int{}
+	existingVMs := map[string]VMEntry{}
 	if show, err := runner.ShowJSON(ctx); err == nil {
 		existingVMs = extractVMsFromShow(show)
 	}
 
-	// Build new vms map: name -> vmid
-	newVMs := map[string]int{}
+	// Build new vms map: name -> VMEntry
+	newVMs := map[string]VMEntry{}
 	for i := 0; i < form.Count; i++ {
 		name := fmt.Sprintf("%s-%02d", form.NamePrefix, i+1)
-		newVMs[name] = form.VMIDStart + i
+		newVMs[name] = VMEntry{VMID: form.VMIDStart + i, Node: form.Node}
 	}
 
 	// Conflict check + merge
@@ -207,14 +242,14 @@ func handleLaunch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Create var-file payload matching your Terraform variables
+	// Create var-file payload matching Terraform variables
 	varPayload := map[string]any{
 		"template_vmid": form.TemplateVMID,
+		"template_node": cfg.Defaults.TemplateNode,
 		"instance_type": form.InstanceType,
 		"full_clone":    form.FullClone,
 		"vms":           vms,
 
-		"node_name":      cfg.Defaults.NodeName,
 		"bridge":         cfg.Defaults.Bridge,
 		"ci_user":        cfg.Defaults.CIUser,
 		"ci_datastore":   cfg.Defaults.CIDatastore,
@@ -276,6 +311,7 @@ func parseLaunchForm(r *http.Request) (LaunchForm, error) {
 	return LaunchForm{
 		TemplateVMID: tpl,
 		InstanceType: r.FormValue("instance_type"),
+		Node:         r.FormValue("node"),
 		Count:        count,
 		NamePrefix:   r.FormValue("name_prefix"),
 		VMIDStart:    vmidStart,
@@ -301,6 +337,15 @@ func isAllowedInstanceType(s string) bool {
 	return false
 }
 
+func isAllowedNode(s string) bool {
+	for _, n := range cfg.AllowedNodes {
+		if n == s {
+			return true
+		}
+	}
+	return false
+}
+
 func renderResult(w http.ResponseWriter, res Result) {
 	_ = tmpl.ExecuteTemplate(w, "result.html", res)
 }
@@ -313,18 +358,18 @@ func stripANSI(s string) string {
 
 // mergeVMs checks newVMs for name/VMID conflicts with existingVMs, then returns
 // the merged map (existing + new) to be passed to Terraform.
-func mergeVMs(existing, incoming map[string]int) (map[string]int, error) {
-	for name, vmid := range incoming {
+func mergeVMs(existing, incoming map[string]VMEntry) (map[string]VMEntry, error) {
+	for name, entry := range incoming {
 		if _, exists := existing[name]; exists {
 			return nil, fmt.Errorf("VM name %q already exists in state", name)
 		}
-		for existingName, existingVMID := range existing {
-			if existingVMID == vmid {
-				return nil, fmt.Errorf("VMID %d is already used by %q", vmid, existingName)
+		for existingName, existingEntry := range existing {
+			if existingEntry.VMID == entry.VMID {
+				return nil, fmt.Errorf("VMID %d is already used by %q", entry.VMID, existingName)
 			}
 		}
 	}
-	merged := make(map[string]int, len(existing)+len(incoming))
+	merged := make(map[string]VMEntry, len(existing)+len(incoming))
 	for k, v := range existing {
 		merged[k] = v
 	}
@@ -422,16 +467,16 @@ func handleDestroy(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	// Build var file with current state so credentials are present.
-	existingVMs := map[string]int{}
+	existingVMs := map[string]VMEntry{}
 	if show, err := runner.ShowJSON(ctx); err == nil {
 		existingVMs = extractVMsFromShow(show)
 	}
 	varPayload := map[string]any{
 		"vms":            existingVMs,
 		"template_vmid":  cfg.AllowedTemplates[0].VMID,
+		"template_node":  cfg.Defaults.TemplateNode,
 		"instance_type":  cfg.Defaults.InstanceType,
 		"full_clone":     cfg.Defaults.FullClone,
-		"node_name":      cfg.Defaults.NodeName,
 		"bridge":         cfg.Defaults.Bridge,
 		"ci_user":        cfg.Defaults.CIUser,
 		"ci_datastore":   cfg.Defaults.CIDatastore,
@@ -514,15 +559,88 @@ func saveProtected(protected map[string]bool) {
 	_ = os.WriteFile("protected.json", b, 0o600)
 }
 
-// extractVMsFromShow rebuilds a name->vmid map from terraform show -json.
-func extractVMsFromShow(show map[string]any) map[string]int {
-	result := map[string]int{}
+// handleStart powers on a stopped VM via the Proxmox API.
+func handleStart(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", 405)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "bad form", 400)
+		return
+	}
+	name := strings.TrimSpace(r.FormValue("name"))
+	if name == "" {
+		http.Error(w, "name required", 400)
+		return
+	}
+
+	runner := tf.Runner{Dir: cfg.TerraformDir}
+	ctx, cancel := tf.DefaultTimeoutCtx()
+	defer cancel()
+	vms := map[string]VMEntry{}
+	if show, err := runner.ShowJSON(ctx); err == nil {
+		vms = extractVMsFromShow(show)
+	}
+	entry, ok := vms[name]
+	if !ok {
+		http.Error(w, "instance not found in state", 404)
+		return
+	}
+
+	if err := pveClient.StartVM(entry.Node, entry.VMID); err != nil {
+		http.Error(w, fmt.Sprintf("start failed: %v", err), 500)
+		return
+	}
+	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
+// handleStop sends an ACPI shutdown to a running VM via the Proxmox API.
+func handleStop(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", 405)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "bad form", 400)
+		return
+	}
+	name := strings.TrimSpace(r.FormValue("name"))
+	if name == "" {
+		http.Error(w, "name required", 400)
+		return
+	}
+
+	runner := tf.Runner{Dir: cfg.TerraformDir}
+	ctx, cancel := tf.DefaultTimeoutCtx()
+	defer cancel()
+	vms := map[string]VMEntry{}
+	if show, err := runner.ShowJSON(ctx); err == nil {
+		vms = extractVMsFromShow(show)
+	}
+	entry, ok := vms[name]
+	if !ok {
+		http.Error(w, "instance not found in state", 404)
+		return
+	}
+
+	if err := pveClient.StopVM(entry.Node, entry.VMID); err != nil {
+		http.Error(w, fmt.Sprintf("stop failed: %v", err), 500)
+		return
+	}
+	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
+// extractVMsFromShow rebuilds a name->VMEntry map from terraform show -json.
+func extractVMsFromShow(show map[string]any) map[string]VMEntry {
+	result := map[string]VMEntry{}
 	for _, r := range showResources(show) {
 		vals, _ := r["values"].(map[string]any)
 		name, _ := vals["name"].(string)
 		vmidF, _ := vals["vm_id"].(float64)
+		node, _ := vals["node_name"].(string)
 		if name != "" {
-			result[name] = int(vmidF)
+			result[name] = VMEntry{VMID: int(vmidF), Node: node}
 		}
 	}
 	return result

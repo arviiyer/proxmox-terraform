@@ -1,5 +1,10 @@
 variable "vms" {
-  type = map(number) # name => vmid
+  description = "Map of VM names to their configuration"
+  type = map(object({
+    vmid = number
+    node = string
+  }))
+  default = {}
 }
 
 variable "pve_endpoint" {
@@ -13,16 +18,17 @@ variable "pve_api_token" {
   sensitive   = true
 }
 
-variable "node_name" {
-  description = "Proxmox node name"
-  type        = string
-  default     = "summerset"
-}
 
 variable "template_vmid" {
   description = "Template VMID (your 'AMI')"
   type        = number
   default     = 8000
+}
+
+variable "template_node" {
+  description = "Node where the template VM config lives (used for cross-node cloning)"
+  type        = string
+  default     = "summerset"
 }
 
 variable "bridge" {

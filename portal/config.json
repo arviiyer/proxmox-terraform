@@ -1,5 +1,6 @@
 {
   "terraform_dir": "../infra",
+  "allowed_nodes": ["summerset", "skyrim", "valenwood"],
   "allowed_templates": [{ "name": "debian13-docker", "vmid": 8000 }, { "name": "debian13-base", "vmid": 9001 }],
   "allowed_instance_types": [
     "general-nano",
@@ -16,6 +17,7 @@
   ],
   "defaults": {
     "node_name": "summerset",
+    "template_node": "summerset",
     "bridge": "vmbr0",
     "ci_user": "arvind",
     "ci_datastore": "local-lvm",
