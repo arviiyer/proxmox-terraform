@@ -55,10 +55,11 @@ func (c *Client) StartVM(node string, vmid int) error {
 	return c.post(url)
 }
 
-// StopVM sends an ACPI shutdown signal (graceful). Use this for normal stop.
+// StopVM sends a graceful ACPI shutdown with forceStop=1 as fallback,
+// matching the behaviour of the Proxmox web UI stop button.
 func (c *Client) StopVM(node string, vmid int) error {
 	url := fmt.Sprintf("%s/api2/json/nodes/%s/qemu/%d/status/shutdown", c.endpoint, node, vmid)
-	return c.post(url)
+	return c.post(url, "forceStop=1")
 }
 
 func (c *Client) get(url string) ([]byte, error) {
@@ -82,12 +83,21 @@ func (c *Client) get(url string) ([]byte, error) {
 	return body, nil
 }
 
-func (c *Client) post(url string) error {
-	req, err := http.NewRequest(http.MethodPost, url, nil)
+func (c *Client) post(url string, formBody ...string) error {
+	var bodyReader io.Reader
+	contentType := ""
+	if len(formBody) > 0 && formBody[0] != "" {
+		bodyReader = strings.NewReader(formBody[0])
+		contentType = "application/x-www-form-urlencoded"
+	}
+	req, err := http.NewRequest(http.MethodPost, url, bodyReader)
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Authorization", "PVEAPIToken="+c.apiToken)
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
+	}
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return err
