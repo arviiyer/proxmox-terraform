@@ -1,0 +1,7 @@
+.git
+infra/.terraform
+infra/terraform.tfstate
+infra/terraform.tfstate.backup
+infra/portal.auto.tfvars.json
+portal/.env
+portal/protected.json
