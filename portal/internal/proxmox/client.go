@@ -62,6 +62,36 @@ func (c *Client) StopVM(node string, vmid int) error {
 	return c.post(url, "forceStop=1")
 }
 
+// SetProtection enables or disables Proxmox's native VM protection flag,
+// which prevents the VM from being deleted or modified via the Proxmox UI or API.
+func (c *Client) SetProtection(node string, vmid int, protect bool) error {
+	url := fmt.Sprintf("%s/api2/json/nodes/%s/qemu/%d/config", c.endpoint, node, vmid)
+	val := "0"
+	if protect {
+		val = "1"
+	}
+	return c.put(url, "protection="+val)
+}
+
+func (c *Client) put(url string, formBody string) error {
+	req, err := http.NewRequest(http.MethodPut, url, strings.NewReader(formBody))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "PVEAPIToken="+c.apiToken)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("proxmox API %s: %s", resp.Status, body)
+	}
+	return nil
+}
+
 func (c *Client) get(url string) ([]byte, error) {
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {

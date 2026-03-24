@@ -540,6 +540,7 @@ func handleToggleProtection(w http.ResponseWriter, r *http.Request) {
 
 	protectedLock.Lock()
 	protected := loadProtected()
+	nowProtected := !protected[name] // capture intended state before toggle
 	if protected[name] {
 		delete(protected, name)
 	} else {
@@ -547,6 +548,18 @@ func handleToggleProtection(w http.ResponseWriter, r *http.Request) {
 	}
 	saveProtected(protected)
 	protectedLock.Unlock()
+
+	// Sync protection flag to Proxmox (best-effort — protected.json is the portal's source of truth)
+	runner := tf.Runner{Dir: cfg.TerraformDir}
+	ctx, cancel := tf.DefaultTimeoutCtx()
+	defer cancel()
+	if show, err := runner.ShowJSON(ctx); err == nil {
+		if entry, ok := extractVMsFromShow(show)[name]; ok {
+			if err := pveClient.SetProtection(entry.Node, entry.VMID, nowProtected); err != nil {
+				log.Printf("warn: failed to sync Proxmox protection for %s: %v", name, err)
+			}
+		}
+	}
 
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
