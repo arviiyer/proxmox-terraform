@@ -38,6 +38,7 @@ type Config struct {
 		CIDatastore     string `json:"ci_datastore"`
 		FullClone       bool   `json:"full_clone"`
 		InstanceType    string `json:"instance_type"`
+		ConsoleURL      string `json:"console_url"` // base URL of the Proxmox UI, e.g. https://pve.arviiyer.dev
 	} `json:"defaults"`
 }
 

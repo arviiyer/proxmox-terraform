@@ -197,6 +197,12 @@
                             <input type="hidden" name="name" value="{{.Name}}" />
                             <button class="btn btn-lock" type="submit">{{if $protected}}🔓 Unprotect{{else}}🔒 Protect{{end}}</button>
                         </form>
+                        {{if $.defaults.ConsoleURL}}
+                        <a class="btn" target="_blank"
+                            href="{{$.defaults.ConsoleURL}}/?console=kvm&novnc=1&vmid={{.VMID}}&vmname={{.Name}}&node={{.Node}}&resize=off&lang=en">
+                            Console
+                        </a>
+                        {{end}}
                         <button class="btn btn-danger"
                             onclick="openDestroyModal('{{.Name}}', {{if $protected}}true{{else}}false{{end}})">
                             Terminate
