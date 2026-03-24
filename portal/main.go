@@ -176,6 +176,7 @@ func main() {
 		templatesFS,
 		"web/templates/index.html",
 		"web/templates/result.html",
+		"web/templates/job.html",
 	))
 
 	http.HandleFunc("/", handleIndex)
@@ -244,10 +245,15 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Pass the job referenced by ?job= so the template can show a banner.
+	// Pass the job referenced by ?job= only while it is still running,
+	// so the banner and auto-refresh stop once the launch completes.
 	var activeJob *Job
 	if jobID := r.URL.Query().Get("job"); jobID != "" {
-		activeJob = getJob(jobID)
+		if j := getJob(jobID); j != nil {
+			if status, _, _ := j.snapshot(); status == "running" {
+				activeJob = j
+			}
+		}
 	}
 
 	data := map[string]any{
