@@ -2,371 +2,676 @@
 <html>
     <head>
         <meta charset="utf-8" />
-        <title>Proxmox EC2-ish Portal</title>
+        <title>Forge — Proxmox VM Manager</title>
         <style>
+            *, *::before, *::after { box-sizing: border-box; }
+
+            :root {
+                --orange: #e47200;
+                --orange-dark: #c46000;
+                --header-bg: #1a1a2e;
+                --header-text: #f0f0f0;
+                --bg: #f4f5f7;
+                --surface: #ffffff;
+                --border: #dde1e7;
+                --text: #1a1a2e;
+                --text-muted: #6b7280;
+                --green: #16a34a;
+                --green-bg: #dcfce7;
+                --red: #b91c1c;
+                --red-bg: #fee2e2;
+                --yellow: #b45309;
+                --yellow-bg: #fef3c7;
+                --grey: #4b5563;
+                --grey-bg: #f3f4f6;
+                --radius: 8px;
+                --shadow: 0 1px 3px rgba(0,0,0,0.1), 0 1px 2px rgba(0,0,0,0.06);
+            }
+
             body {
-                font-family: system-ui, sans-serif;
-                margin: 24px;
-                max-width: 900px;
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+                margin: 0;
+                background: var(--bg);
+                color: var(--text);
+                font-size: 14px;
+                line-height: 1.5;
             }
-            .card {
-                border: 1px solid #ddd;
-                border-radius: 10px;
-                padding: 16px;
-            }
-            label {
-                display: block;
-                margin-top: 12px;
-                font-weight: 600;
-            }
-            input,
-            select {
-                width: 100%;
-                padding: 8px;
-                margin-top: 6px;
-            }
-            .row {
+
+            /* Header */
+            .header {
+                background: var(--header-bg);
+                color: var(--header-text);
+                padding: 0 24px;
                 display: flex;
-                gap: 12px;
+                align-items: center;
+                height: 56px;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.3);
             }
-            .row > div {
-                flex: 1;
+            .header-brand {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                text-decoration: none;
+                color: inherit;
             }
-            button {
-                margin-top: 16px;
-                padding: 10px 14px;
+            .header-logo {
+                width: 28px;
+                height: 28px;
+                background: var(--orange);
+                border-radius: 6px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 16px;
                 font-weight: 700;
+                color: white;
             }
-            .hint {
-                color: #666;
+            .header-title {
+                font-size: 18px;
+                font-weight: 700;
+                letter-spacing: -0.3px;
+            }
+            .header-subtitle {
+                margin-left: 8px;
+                color: #9ca3af;
                 font-size: 13px;
-                margin-top: 4px;
+                font-weight: 400;
             }
-            table {
-                width: 100%;
-                border-collapse: collapse;
-                margin-bottom: 24px;
+
+            /* Layout */
+            .page {
+                max-width: 1100px;
+                margin: 0 auto;
+                padding: 24px 24px 48px;
             }
-            th, td {
-                text-align: left;
-                padding: 8px 12px;
-                border-bottom: 1px solid #ddd;
-            }
-            th {
-                font-weight: 600;
-                background: #f5f5f5;
-            }
-            .btn {
-                margin-top: 0;
-                padding: 4px 10px;
-                font-size: 13px;
-                cursor: pointer;
-            }
-            .btn-danger {
-                background: #fff0f0;
-                border: 1px solid #f99;
-                color: #b00020;
-            }
-            .btn-lock {
-                background: none;
-                border: 1px solid #ddd;
-            }
-            dialog {
-                border: 1px solid #ddd;
-                border-radius: 10px;
-                padding: 24px;
-                min-width: 360px;
-            }
-            dialog::backdrop {
-                background: rgba(0,0,0,0.3);
-            }
-            dialog h3 {
-                margin-top: 0;
-            }
-            dialog input {
-                width: 100%;
-                padding: 8px;
-                margin-top: 6px;
-                box-sizing: border-box;
-            }
-            dialog .actions {
-                display: flex;
-                gap: 8px;
-                justify-content: flex-end;
-                margin-top: 16px;
-            }
-            .protected-badge {
-                font-size: 12px;
-                color: #888;
-                margin-left: 6px;
-            }
+
+            /* Banner */
             .banner {
-                background: #fffbea;
-                border: 1px solid #f0c040;
-                border-radius: 8px;
+                background: #fffbeb;
+                border: 1px solid #f59e0b;
+                border-radius: var(--radius);
                 padding: 12px 16px;
                 margin-bottom: 20px;
                 display: flex;
                 align-items: center;
-                gap: 12px;
+                gap: 10px;
+                font-size: 13px;
+                color: #92400e;
             }
             .banner a {
                 margin-left: auto;
-                font-size: 13px;
+                color: var(--orange-dark);
+                font-weight: 600;
+                text-decoration: none;
+                white-space: nowrap;
             }
-            .status-launching {
-                color: #888;
-                font-style: italic;
+            .banner a:hover { text-decoration: underline; }
+
+            /* Section heading */
+            .section-header {
+                display: flex;
+                align-items: baseline;
+                gap: 10px;
+                margin: 0 0 12px;
+            }
+            .section-header h1, .section-header h2 {
+                margin: 0;
+                font-size: 18px;
+                font-weight: 700;
+                color: var(--text);
+            }
+            .section-header .count {
+                font-size: 13px;
+                color: var(--text-muted);
+            }
+
+            /* Card */
+            .card {
+                background: var(--surface);
+                border: 1px solid var(--border);
+                border-radius: var(--radius);
+                box-shadow: var(--shadow);
+                margin-bottom: 24px;
+                overflow: hidden;
+            }
+
+            /* Table */
+            table {
+                width: 100%;
+                border-collapse: collapse;
+            }
+            thead {
+                background: #f8f9fa;
+                border-bottom: 1px solid var(--border);
+            }
+            th {
+                text-align: left;
+                padding: 10px 14px;
+                font-size: 12px;
+                font-weight: 600;
+                text-transform: uppercase;
+                letter-spacing: 0.05em;
+                color: var(--text-muted);
+                white-space: nowrap;
+            }
+            td {
+                padding: 12px 14px;
+                border-bottom: 1px solid var(--border);
+                vertical-align: middle;
+            }
+            tbody tr:last-child td { border-bottom: none; }
+            tbody tr:hover { background: #fafafa; }
+            tbody tr.row-dim { opacity: 0.6; }
+            tbody tr.row-dim:hover { background: transparent; }
+
+            /* Status badges */
+            .badge {
+                display: inline-flex;
+                align-items: center;
+                gap: 5px;
+                padding: 2px 10px;
+                border-radius: 12px;
+                font-size: 12px;
+                font-weight: 600;
+                white-space: nowrap;
+            }
+            .badge-dot {
+                width: 7px;
+                height: 7px;
+                border-radius: 50%;
+                flex-shrink: 0;
+            }
+            .badge-running  { background: var(--green-bg); color: var(--green); }
+            .badge-running .badge-dot { background: var(--green); }
+            .badge-stopped  { background: var(--grey-bg); color: var(--grey); }
+            .badge-stopped .badge-dot { background: #9ca3af; }
+            .badge-launching { background: var(--yellow-bg); color: var(--yellow); }
+            .badge-launching .badge-dot { background: var(--orange); animation: pulse 1.2s ease-in-out infinite; }
+            .badge-terminating { background: var(--red-bg); color: var(--red); }
+            .badge-terminating .badge-dot { background: var(--red); animation: pulse 1.2s ease-in-out infinite; }
+
+            @keyframes pulse {
+                0%, 100% { opacity: 1; }
+                50% { opacity: 0.3; }
             }
             @keyframes spin { to { transform: rotate(360deg); } }
             .spinner {
                 display: inline-block;
                 animation: spin 1s linear infinite;
             }
+
+            /* Instance name cell */
+            .name-cell {
+                display: flex;
+                align-items: center;
+                gap: 6px;
+            }
+            .name-text { font-weight: 500; }
+            .lock-icon { font-size: 12px; color: var(--text-muted); }
+
+            /* IP / VMID monospace */
+            .mono {
+                font-family: "SF Mono", "Fira Code", ui-monospace, monospace;
+                font-size: 13px;
+            }
+
+            /* Empty state */
+            .empty {
+                padding: 40px 24px;
+                text-align: center;
+                color: var(--text-muted);
+            }
+            .empty-icon { font-size: 32px; margin-bottom: 8px; }
+
+            /* Action buttons */
+            .actions { display: flex; gap: 6px; flex-wrap: nowrap; align-items: center; }
+            .btn {
+                display: inline-flex;
+                align-items: center;
+                gap: 4px;
+                padding: 5px 12px;
+                border-radius: 5px;
+                font-size: 12px;
+                font-weight: 600;
+                cursor: pointer;
+                border: 1px solid var(--border);
+                background: var(--surface);
+                color: var(--text);
+                text-decoration: none;
+                white-space: nowrap;
+                transition: background 0.1s, border-color 0.1s;
+                line-height: 1.4;
+            }
+            .btn:hover { background: #f1f3f5; border-color: #c0c6cf; }
+            .btn-start { border-color: #86efac; background: #f0fdf4; color: var(--green); }
+            .btn-start:hover { background: #dcfce7; }
+            .btn-stop { border-color: #fca5a5; background: #fff5f5; color: #dc2626; }
+            .btn-stop:hover { background: var(--red-bg); }
+            .btn-danger { border-color: #fca5a5; background: #fff5f5; color: var(--red); }
+            .btn-danger:hover { background: var(--red-bg); }
+            .btn-console { border-color: #93c5fd; background: #eff6ff; color: #1d4ed8; }
+            .btn-console:hover { background: #dbeafe; }
+            .btn-primary {
+                background: var(--orange);
+                border-color: var(--orange-dark);
+                color: white;
+                padding: 9px 20px;
+                font-size: 14px;
+            }
+            .btn-primary:hover { background: var(--orange-dark); }
+
+            /* Forms inline */
+            form { display: inline; margin: 0; }
+
+            /* Divider */
+            .divider { border: none; border-top: 1px solid var(--border); margin: 24px 0; }
+
+            /* Launch form */
+            .form-card {
+                background: var(--surface);
+                border: 1px solid var(--border);
+                border-radius: var(--radius);
+                box-shadow: var(--shadow);
+                overflow: hidden;
+            }
+            .form-card-header {
+                padding: 14px 20px;
+                background: #f8f9fa;
+                border-bottom: 1px solid var(--border);
+                font-weight: 700;
+                font-size: 14px;
+                color: var(--text);
+            }
+            .form-body { padding: 20px; }
+            .form-grid {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 16px;
+            }
+            .form-group { display: flex; flex-direction: column; gap: 5px; }
+            .form-group.full { grid-column: 1 / -1; }
+            label {
+                font-size: 12px;
+                font-weight: 600;
+                color: var(--text-muted);
+                text-transform: uppercase;
+                letter-spacing: 0.04em;
+            }
+            input[type="text"],
+            input[type="number"],
+            select,
+            textarea {
+                width: 100%;
+                padding: 8px 10px;
+                border: 1px solid var(--border);
+                border-radius: 5px;
+                font-size: 14px;
+                color: var(--text);
+                background: var(--surface);
+                transition: border-color 0.15s, box-shadow 0.15s;
+                font-family: inherit;
+            }
+            input:focus, select:focus, textarea:focus {
+                outline: none;
+                border-color: var(--orange);
+                box-shadow: 0 0 0 3px rgba(228,114,0,0.15);
+            }
+            textarea {
+                font-family: "SF Mono", "Fira Code", ui-monospace, monospace;
+                font-size: 12px;
+                resize: vertical;
+            }
+            .hint {
+                font-size: 11px;
+                color: var(--text-muted);
+                margin-top: 2px;
+            }
+            .checkbox-row {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                padding: 6px 0;
+            }
+            .checkbox-row input[type="checkbox"] { width: auto; margin: 0; }
+            .checkbox-row label {
+                font-size: 13px;
+                text-transform: none;
+                letter-spacing: 0;
+                font-weight: 500;
+                color: var(--text);
+                cursor: pointer;
+            }
+            .form-footer {
+                padding: 16px 20px;
+                background: #f8f9fa;
+                border-top: 1px solid var(--border);
+                display: flex;
+                align-items: center;
+                justify-content: flex-end;
+                gap: 12px;
+            }
+
+            /* Destroy modal */
+            dialog {
+                border: 1px solid var(--border);
+                border-radius: var(--radius);
+                padding: 0;
+                box-shadow: 0 20px 60px rgba(0,0,0,0.15);
+                min-width: 380px;
+                max-width: 90vw;
+            }
+            dialog::backdrop { background: rgba(0,0,0,0.4); }
+            .modal-header {
+                padding: 16px 20px;
+                border-bottom: 1px solid var(--border);
+                display: flex;
+                align-items: center;
+                gap: 8px;
+            }
+            .modal-header h3 { margin: 0; font-size: 15px; font-weight: 700; }
+            .modal-body { padding: 16px 20px; }
+            .modal-body p { margin: 0 0 12px; color: var(--text-muted); font-size: 13px; }
+            .modal-body .instance-name {
+                font-family: ui-monospace, monospace;
+                background: #f3f4f6;
+                padding: 2px 6px;
+                border-radius: 4px;
+                color: var(--text);
+                font-size: 13px;
+            }
+            .modal-body label { margin-bottom: 4px; }
+            .modal-warn {
+                background: var(--red-bg);
+                border: 1px solid #fca5a5;
+                border-radius: 5px;
+                padding: 10px 12px;
+                margin-top: 12px;
+                color: var(--red);
+                font-size: 12px;
+            }
+            .modal-warn strong { display: block; margin-bottom: 4px; font-size: 13px; }
+            .modal-footer {
+                padding: 12px 20px;
+                border-top: 1px solid var(--border);
+                display: flex;
+                gap: 8px;
+                justify-content: flex-end;
+            }
         </style>
     </head>
     <body>
-        {{if .job}}
-        <div class="banner">
-            {{if eq .job.Kind "destroy"}}
-            <span><span class="spinner">⟳</span> Terminating {{index .job.Names 0}} — this may take a minute.</span>
-            {{else}}
-            <span><span class="spinner">⟳</span> Launching instances — this may take a few minutes.</span>
-            {{end}}
-            <a href="/job/{{.job.ID}}">View progress →</a>
-        </div>
-        {{end}}
+        <header class="header">
+            <a class="header-brand" href="/">
+                <div class="header-logo">F</div>
+                <span class="header-title">forge</span>
+                <span class="header-subtitle">Proxmox VM Manager</span>
+            </a>
+        </header>
 
-        <h1>Instances</h1>
-        {{if .instances}}
-        <table>
-            <thead>
-                <tr>
-                    <th>Name</th>
-                    <th>VMID</th>
-                    <th>Node</th>
-                    <th>IP</th>
-                    <th>Status</th>
-                    <th></th>
-                </tr>
-            </thead>
-            <tbody>
-                {{range .instances}}
-                {{$protected := index $.protected .Name}}
-                {{if eq .Status "launching"}}
-                <tr style="opacity:0.6">
-                    <td>{{.Name}}</td>
-                    <td>—</td>
-                    <td>—</td>
-                    <td>—</td>
-                    <td class="status-launching"><span class="spinner">⟳</span> launching</td>
-                    <td></td>
-                </tr>
-                {{else if eq .Status "terminating"}}
-                <tr style="opacity:0.6">
-                    <td>{{.Name}}</td>
-                    <td>{{.VMID}}</td>
-                    <td>{{.Node}}</td>
-                    <td>—</td>
-                    <td class="status-launching"><span class="spinner">⟳</span> terminating</td>
-                    <td></td>
-                </tr>
+        <div class="page">
+            {{if .job}}
+            <div class="banner">
+                {{if eq .job.Kind "destroy"}}
+                <span><span class="spinner">⟳</span> &nbsp;Terminating <strong>{{index .job.Names 0}}</strong> — this may take a minute.</span>
                 {{else}}
-                <tr>
-                    <td>
-                        {{.Name}}
-                        {{if $protected}}<span class="protected-badge">🔒 protected</span>{{end}}
-                    </td>
-                    <td>{{.VMID}}</td>
-                    <td>{{.Node}}</td>
-                    <td>{{if .PrivateIP}}{{.PrivateIP}}{{else}}—{{end}}</td>
-                    <td>{{if .Status}}{{.Status}}{{else}}—{{end}}</td>
-                    <td style="white-space:nowrap">
-                        {{if eq .Status "stopped"}}
-                        <form method="POST" action="/start" style="display:inline">
-                            <input type="hidden" name="name" value="{{.Name}}" />
-                            <button class="btn" type="submit">▶ Start</button>
-                        </form>
-                        {{else if eq .Status "running"}}
-                        <form method="POST" action="/stop" style="display:inline">
-                            <input type="hidden" name="name" value="{{.Name}}" />
-                            <button class="btn" type="submit">⏹ Stop</button>
-                        </form>
-                        {{end}}
-                        <form method="POST" action="/toggle-protection" style="display:inline">
-                            <input type="hidden" name="name" value="{{.Name}}" />
-                            <button class="btn btn-lock" type="submit">{{if $protected}}🔓 Unprotect{{else}}🔒 Protect{{end}}</button>
-                        </form>
-                        {{if $.defaults.ConsoleURL}}
-                        <a class="btn" target="_blank"
-                            href="{{$.defaults.ConsoleURL}}/?console=kvm&novnc=1&vmid={{.VMID}}&vmname={{.Name}}&node={{.Node}}&resize=off&lang=en">
-                            Console
-                        </a>
-                        {{end}}
-                        <button class="btn btn-danger"
-                            onclick="openDestroyModal('{{.Name}}', {{if $protected}}true{{else}}false{{end}})">
-                            Terminate
-                        </button>
-                    </td>
-                </tr>
+                <span><span class="spinner">⟳</span> &nbsp;Launching instances — this may take a few minutes.</span>
                 {{end}}
+                <a href="/job/{{.job.ID}}">View progress →</a>
+            </div>
+            {{end}}
+
+            <div class="section-header">
+                <h1>Instances</h1>
+                {{if .instances}}<span class="count">({{len .instances}})</span>{{end}}
+            </div>
+
+            <div class="card">
+                {{if .instances}}
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>VMID</th>
+                            <th>Node</th>
+                            <th>IP Address</th>
+                            <th>Status</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {{range .instances}}
+                        {{$protected := index $.protected .Name}}
+                        {{if eq .Status "launching"}}
+                        <tr class="row-dim">
+                            <td><div class="name-cell"><span class="name-text">{{.Name}}</span></div></td>
+                            <td class="mono">—</td>
+                            <td>—</td>
+                            <td class="mono">—</td>
+                            <td><span class="badge badge-launching"><span class="badge-dot"></span>launching</span></td>
+                            <td></td>
+                        </tr>
+                        {{else if eq .Status "terminating"}}
+                        <tr class="row-dim">
+                            <td><div class="name-cell"><span class="name-text">{{.Name}}</span></div></td>
+                            <td class="mono">{{.VMID}}</td>
+                            <td>{{.Node}}</td>
+                            <td class="mono">—</td>
+                            <td><span class="badge badge-terminating"><span class="badge-dot"></span>terminating</span></td>
+                            <td></td>
+                        </tr>
+                        {{else}}
+                        <tr>
+                            <td>
+                                <div class="name-cell">
+                                    <span class="name-text">{{.Name}}</span>
+                                    {{if $protected}}<span class="lock-icon" title="Protected">🔒</span>{{end}}
+                                </div>
+                            </td>
+                            <td class="mono">{{.VMID}}</td>
+                            <td>{{.Node}}</td>
+                            <td class="mono">{{if .PrivateIP}}{{.PrivateIP}}{{else}}—{{end}}</td>
+                            <td>
+                                {{if eq .Status "running"}}
+                                <span class="badge badge-running"><span class="badge-dot"></span>running</span>
+                                {{else if eq .Status "stopped"}}
+                                <span class="badge badge-stopped"><span class="badge-dot"></span>stopped</span>
+                                {{else}}
+                                <span class="badge badge-stopped"><span class="badge-dot"></span>{{if .Status}}{{.Status}}{{else}}unknown{{end}}</span>
+                                {{end}}
+                            </td>
+                            <td>
+                                <div class="actions">
+                                    {{if eq .Status "stopped"}}
+                                    <form method="POST" action="/start">
+                                        <input type="hidden" name="name" value="{{.Name}}" />
+                                        <button class="btn btn-start" type="submit">▶ Start</button>
+                                    </form>
+                                    {{else if eq .Status "running"}}
+                                    <form method="POST" action="/stop">
+                                        <input type="hidden" name="name" value="{{.Name}}" />
+                                        <button class="btn btn-stop" type="submit">⏹ Stop</button>
+                                    </form>
+                                    {{end}}
+                                    <form method="POST" action="/toggle-protection">
+                                        <input type="hidden" name="name" value="{{.Name}}" />
+                                        <button class="btn" type="submit" title="{{if $protected}}Remove protection{{else}}Enable protection{{end}}">{{if $protected}}🔓{{else}}🔒{{end}}</button>
+                                    </form>
+                                    {{if $.defaults.ConsoleURL}}
+                                    <a class="btn btn-console" target="_blank"
+                                        href="{{$.defaults.ConsoleURL}}/?console=kvm&novnc=1&vmid={{.VMID}}&vmname={{.Name}}&node={{.Node}}&resize=off&lang=en">
+                                        Console
+                                    </a>
+                                    {{end}}
+                                    <button class="btn btn-danger"
+                                        onclick="openDestroyModal('{{.Name}}', {{if $protected}}true{{else}}false{{end}})">
+                                        Terminate
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+                        {{end}}
+                        {{end}}
+                    </tbody>
+                </table>
+                {{else}}
+                <div class="empty">
+                    <div class="empty-icon">🖥️</div>
+                    <div>No instances. Launch one below.</div>
+                </div>
                 {{end}}
-            </tbody>
-        </table>
-        {{else}}
-        <p class="hint">No instances.</p>
-        {{end}}
-
-        <dialog id="destroy-modal">
-            <h3>Terminate instance</h3>
-            <p id="modal-desc"></p>
-            <label>Type the instance name to confirm:
-                <input id="modal-confirm" type="text" autocomplete="off" />
-            </label>
-            <div id="override-section" style="display:none">
-                <p style="color:#b00020;margin-top:12px">
-                    ⚠️ This instance is protected. Type <strong>destroy protected instance</strong> to proceed.
-                </p>
-                <label>
-                    <input id="modal-override" type="text" autocomplete="off" />
-                </label>
             </div>
-            <div class="actions">
-                <button class="btn" onclick="document.getElementById('destroy-modal').close()">Cancel</button>
-                <button class="btn btn-danger" onclick="submitDestroy()">Terminate</button>
-            </div>
-        </dialog>
 
-        <form id="destroy-form" method="POST" action="/destroy" style="display:none">
-            <input type="hidden" name="name" id="df-name" />
-            <input type="hidden" name="confirm" id="df-confirm" />
-            <input type="hidden" name="override_confirm" id="df-override" />
-        </form>
-
-        {{if .job}}
-        <script>
-            // Auto-refresh every 5s while a launch job is active, until it completes.
-            (function poll() {
-                fetch('/job/{{.job.ID}}', {headers: {'Accept': 'application/json'}})
-                    .catch(() => null);
-                setTimeout(function() { location.reload(); }, 5000);
-            })();
-        </script>
-        {{end}}
-
-        <script>
-            let _destroyName = '';
-            let _destroyProtected = false;
-
-            function openDestroyModal(name, isProtected) {
-                _destroyName = name;
-                _destroyProtected = isProtected;
-                document.getElementById('modal-desc').textContent = 'Instance: ' + name;
-                document.getElementById('modal-confirm').value = '';
-                document.getElementById('modal-override').value = '';
-                document.getElementById('override-section').style.display = isProtected ? 'block' : 'none';
-                document.getElementById('destroy-modal').showModal();
-            }
-
-            function submitDestroy() {
-                const confirm = document.getElementById('modal-confirm').value;
-                if (confirm !== _destroyName) {
-                    alert('Instance name does not match.');
-                    return;
-                }
-                if (_destroyProtected) {
-                    const override = document.getElementById('modal-override').value;
-                    if (override !== 'destroy protected instance') {
-                        alert('Override phrase does not match.');
-                        return;
-                    }
-                    document.getElementById('df-override').value = override;
-                }
-                document.getElementById('df-name').value = _destroyName;
-                document.getElementById('df-confirm').value = confirm;
-                document.getElementById('destroy-form').submit();
-            }
-        </script>
-
-        <h2>Launch</h2>
-        <div class="card">
-            <form method="POST" action="/launch">
-                <label>Template (AMI)</label>
-                <select name="template_vmid" required>
-                    {{range .templates}}
-                    <option value="{{.VMID}}">
-                        {{.Name}} (VMID {{.VMID}})
-                    </option>
-                    {{end}}
-                </select>
-
-                <label>Node</label>
-                <select name="node" required>
-                    {{range .nodes}}
-                    <option value="{{.}}" {{if eq . $.defaults.NodeName}}selected{{end}}>{{.}}</option>
-                    {{end}}
-                </select>
-
-                <label>Instance Type</label>
-                <select name="instance_type" required>
-                    {{range .instanceTypes}}
-                    <option
-                        value="{{.}}"
-                        {{if
-                        eq
-                        .
-                        $.defaults.InstanceType}}selected{{end}}
-                    >
-                        {{.}}
-                    </option>
-                    {{end}}
-                </select>
-
-                <div class="row">
-                    <div>
-                        <label>Count</label>
-                        <input
-                            name="count"
-                            type="number"
-                            min="1"
-                            max="50"
-                            value="1"
-                        />
+            <!-- Destroy modal -->
+            <dialog id="destroy-modal">
+                <div class="modal-header">
+                    <span>⚠️</span>
+                    <h3>Terminate instance</h3>
+                </div>
+                <div class="modal-body">
+                    <p>You are about to permanently terminate <span id="modal-name-display" class="instance-name"></span>. This cannot be undone.</p>
+                    <div class="form-group">
+                        <label>Type the instance name to confirm</label>
+                        <input id="modal-confirm" type="text" autocomplete="off" />
                     </div>
-                    <div>
-                        <label>VMID Start</label>
-                        <input
-                            name="vmid_start"
-                            type="number"
-                            min="100"
-                            value="200"
-                        />
-                        <div class="hint">
-                            Choose a free range (e.g., 200+).
+                    <div id="override-section" style="display:none">
+                        <div class="modal-warn">
+                            <strong>🔒 Protected instance</strong>
+                            Type <strong>destroy protected instance</strong> to proceed anyway.
+                        </div>
+                        <div class="form-group" style="margin-top:10px">
+                            <label>Override phrase</label>
+                            <input id="modal-override" type="text" autocomplete="off" />
                         </div>
                     </div>
                 </div>
+                <div class="modal-footer">
+                    <button class="btn" onclick="document.getElementById('destroy-modal').close()">Cancel</button>
+                    <button class="btn btn-danger" onclick="submitDestroy()">Terminate</button>
+                </div>
+            </dialog>
 
-                <label>Name Prefix</label>
-                <input name="name_prefix" value="vm" />
-                <div class="hint">Creates vm-01, vm-02, ...</div>
-
-                <label
-                    ><input type="checkbox" name="full_clone" {{if $.defaults.FullClone}}checked{{end}} /> Full clone
-                    (slower, independent disk)</label
-                >
-
-                <label>User Data <span style="font-weight:400;color:#666">(optional — cloud-init script)</span></label>
-                <textarea
-                    name="user_data"
-                    rows="6"
-                    style="width:100%;padding:8px;margin-top:6px;font-family:monospace;font-size:13px"
-                    placeholder="#cloud-config&#10;packages:&#10;  - nginx"
-                ></textarea>
-                <div class="hint">Runs once at first boot. Leave blank for no user data.</div>
-
-                <button type="submit">Launch</button>
+            <form id="destroy-form" method="POST" action="/destroy" style="display:none">
+                <input type="hidden" name="name" id="df-name" />
+                <input type="hidden" name="confirm" id="df-confirm" />
+                <input type="hidden" name="override_confirm" id="df-override" />
             </form>
+
+            {{if .job}}
+            <script>
+                (function poll() {
+                    fetch('/job/{{.job.ID}}', {headers: {'Accept': 'application/json'}})
+                        .catch(() => null);
+                    setTimeout(function() { location.reload(); }, 5000);
+                })();
+            </script>
+            {{end}}
+
+            <script>
+                let _destroyName = '';
+                let _destroyProtected = false;
+
+                function openDestroyModal(name, isProtected) {
+                    _destroyName = name;
+                    _destroyProtected = isProtected;
+                    document.getElementById('modal-name-display').textContent = name;
+                    document.getElementById('modal-confirm').value = '';
+                    document.getElementById('modal-override').value = '';
+                    document.getElementById('override-section').style.display = isProtected ? 'block' : 'none';
+                    document.getElementById('destroy-modal').showModal();
+                }
+
+                function submitDestroy() {
+                    const confirm = document.getElementById('modal-confirm').value;
+                    if (confirm !== _destroyName) {
+                        alert('Instance name does not match.');
+                        return;
+                    }
+                    if (_destroyProtected) {
+                        const override = document.getElementById('modal-override').value;
+                        if (override !== 'destroy protected instance') {
+                            alert('Override phrase does not match.');
+                            return;
+                        }
+                        document.getElementById('df-override').value = override;
+                    }
+                    document.getElementById('df-name').value = _destroyName;
+                    document.getElementById('df-confirm').value = confirm;
+                    document.getElementById('destroy-form').submit();
+                }
+            </script>
+
+            <div class="section-header" style="margin-top: 8px;">
+                <h2>Launch Instance</h2>
+            </div>
+
+            <div class="form-card">
+                <div class="form-card-header">Configure new instance</div>
+                <form method="POST" action="/launch">
+                    <div class="form-body">
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label>Template (AMI)</label>
+                                <select name="template_vmid" required>
+                                    {{range .templates}}
+                                    <option value="{{.VMID}}">{{.Name}} (VMID {{.VMID}})</option>
+                                    {{end}}
+                                </select>
+                            </div>
+
+                            <div class="form-group">
+                                <label>Instance Type</label>
+                                <select name="instance_type" required>
+                                    {{range .instanceTypes}}
+                                    <option value="{{.}}" {{if eq . $.defaults.InstanceType}}selected{{end}}>{{.}}</option>
+                                    {{end}}
+                                </select>
+                            </div>
+
+                            <div class="form-group">
+                                <label>Node</label>
+                                <select name="node" required>
+                                    {{range .nodes}}
+                                    <option value="{{.}}" {{if eq . $.defaults.NodeName}}selected{{end}}>{{.}}</option>
+                                    {{end}}
+                                </select>
+                            </div>
+
+                            <div class="form-group">
+                                <label>Name Prefix</label>
+                                <input name="name_prefix" type="text" value="vm" />
+                                <div class="hint">Creates vm-01, vm-02, …</div>
+                            </div>
+
+                            <div class="form-group">
+                                <label>Count</label>
+                                <input name="count" type="number" min="1" max="50" value="1" />
+                            </div>
+
+                            <div class="form-group">
+                                <label>VMID Start</label>
+                                <input name="vmid_start" type="number" min="100" value="200" />
+                                <div class="hint">Choose a free range (e.g. 200+)</div>
+                            </div>
+
+                            <div class="form-group full">
+                                <div class="checkbox-row">
+                                    <input type="checkbox" name="full_clone" id="full_clone" {{if $.defaults.FullClone}}checked{{end}} />
+                                    <label for="full_clone">Full clone (slower, independent disk)</label>
+                                </div>
+                            </div>
+
+                            <div class="form-group full">
+                                <label>User Data <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-muted)">(optional — cloud-init script)</span></label>
+                                <textarea name="user_data" rows="6" placeholder="#cloud-config&#10;packages:&#10;  - nginx"></textarea>
+                                <div class="hint">Runs once at first boot. Leave blank for no user data.</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="form-footer">
+                        <button type="submit" class="btn btn-primary">Launch Instance</button>
+                    </div>
+                </form>
+            </div>
         </div>
     </body>
 </html>

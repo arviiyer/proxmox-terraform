@@ -2,78 +2,298 @@
 <html>
     <head>
         <meta charset="utf-8" />
-        <title>Launching…</title>
+        <title>{{if eq .Kind "destroy"}}Terminating{{else}}Launching{{end}} — Forge</title>
         <style>
+            *, *::before, *::after { box-sizing: border-box; }
+
+            :root {
+                --orange: #e47200;
+                --orange-dark: #c46000;
+                --header-bg: #1a1a2e;
+                --bg: #f4f5f7;
+                --surface: #ffffff;
+                --border: #dde1e7;
+                --text: #1a1a2e;
+                --text-muted: #6b7280;
+                --green: #16a34a;
+                --green-bg: #dcfce7;
+                --red: #b91c1c;
+                --red-bg: #fee2e2;
+                --yellow: #b45309;
+                --yellow-bg: #fef3c7;
+                --radius: 8px;
+                --shadow: 0 1px 3px rgba(0,0,0,0.1);
+            }
+
             body {
-                font-family: system-ui, sans-serif;
-                margin: 24px;
-                max-width: 900px;
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+                margin: 0;
+                background: var(--bg);
+                color: var(--text);
+                font-size: 14px;
+                line-height: 1.5;
             }
-            pre {
-                background: #111;
-                color: #eee;
-                padding: 12px;
-                border-radius: 10px;
-                overflow: auto;
-                white-space: pre-wrap;
+
+            .header {
+                background: var(--header-bg);
+                color: #f0f0f0;
+                padding: 0 24px;
+                display: flex;
+                align-items: center;
+                height: 56px;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.3);
             }
-            .status-running  { color: #b07000; font-weight: 600; }
-            .status-done     { color: #006600; font-weight: 600; }
-            .status-failed   { color: #b00020; font-weight: 600; }
-            .err { color: #b00020; font-weight: 700; margin-bottom: 12px; }
-            ul { margin: 4px 0 16px 0; }
+            .header-brand {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                text-decoration: none;
+                color: inherit;
+            }
+            .header-logo {
+                width: 28px;
+                height: 28px;
+                background: var(--orange);
+                border-radius: 6px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 16px;
+                font-weight: 700;
+                color: white;
+            }
+            .header-title { font-size: 18px; font-weight: 700; letter-spacing: -0.3px; }
+            .header-subtitle { margin-left: 8px; color: #9ca3af; font-size: 13px; }
+
+            .page {
+                max-width: 860px;
+                margin: 0 auto;
+                padding: 32px 24px 48px;
+            }
+
+            .job-header {
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                margin-bottom: 24px;
+            }
+            .job-header h1 {
+                margin: 0;
+                font-size: 22px;
+                font-weight: 700;
+            }
+
             @keyframes spin { to { transform: rotate(360deg); } }
             .spinner { display: inline-block; animation: spin 1s linear infinite; }
+
+            .badge {
+                display: inline-flex;
+                align-items: center;
+                gap: 5px;
+                padding: 3px 12px;
+                border-radius: 12px;
+                font-size: 12px;
+                font-weight: 700;
+            }
+            .badge-running  { background: var(--yellow-bg); color: var(--yellow); }
+            .badge-done     { background: var(--green-bg); color: var(--green); }
+            .badge-failed   { background: var(--red-bg); color: var(--red); }
+
+            .card {
+                background: var(--surface);
+                border: 1px solid var(--border);
+                border-radius: var(--radius);
+                box-shadow: var(--shadow);
+                margin-bottom: 20px;
+            }
+            .card-header {
+                padding: 12px 16px;
+                border-bottom: 1px solid var(--border);
+                font-weight: 700;
+                font-size: 13px;
+                color: var(--text-muted);
+                text-transform: uppercase;
+                letter-spacing: 0.05em;
+                background: #f8f9fa;
+                border-radius: var(--radius) var(--radius) 0 0;
+            }
+            .card-body { padding: 16px; }
+
+            .info-grid {
+                display: grid;
+                grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+                gap: 12px;
+            }
+            .info-item { }
+            .info-label {
+                font-size: 11px;
+                font-weight: 600;
+                text-transform: uppercase;
+                letter-spacing: 0.05em;
+                color: var(--text-muted);
+                margin-bottom: 4px;
+            }
+            .info-value {
+                font-size: 14px;
+                font-weight: 500;
+                color: var(--text);
+            }
+            .mono {
+                font-family: "SF Mono", "Fira Code", ui-monospace, monospace;
+                font-size: 13px;
+            }
+
+            ul.instance-list {
+                margin: 0;
+                padding: 0;
+                list-style: none;
+                display: flex;
+                flex-wrap: wrap;
+                gap: 6px;
+            }
+            ul.instance-list li {
+                background: #f3f4f6;
+                border-radius: 5px;
+                padding: 3px 10px;
+                font-family: ui-monospace, monospace;
+                font-size: 12px;
+                color: var(--text);
+            }
+
+            .err-box {
+                background: var(--red-bg);
+                border: 1px solid #fca5a5;
+                border-radius: var(--radius);
+                padding: 12px 16px;
+                color: var(--red);
+                font-size: 13px;
+                margin-bottom: 20px;
+            }
+            .err-box strong { display: block; margin-bottom: 4px; font-size: 14px; }
+
+            .log-card {
+                background: var(--surface);
+                border: 1px solid var(--border);
+                border-radius: var(--radius);
+                box-shadow: var(--shadow);
+                overflow: hidden;
+                margin-bottom: 20px;
+            }
+            pre {
+                background: #111827;
+                color: #d1fae5;
+                padding: 16px;
+                border-radius: 0;
+                overflow: auto;
+                white-space: pre-wrap;
+                margin: 0;
+                font-family: "SF Mono", "Fira Code", ui-monospace, monospace;
+                font-size: 12px;
+                line-height: 1.6;
+                max-height: 600px;
+            }
+
+            .hint-running {
+                background: var(--yellow-bg);
+                border: 1px solid #fde68a;
+                border-radius: var(--radius);
+                padding: 10px 14px;
+                color: var(--yellow);
+                font-size: 13px;
+                margin-bottom: 20px;
+            }
+
+            .back-link {
+                display: inline-flex;
+                align-items: center;
+                gap: 6px;
+                color: var(--orange);
+                text-decoration: none;
+                font-weight: 600;
+                font-size: 13px;
+            }
+            .back-link:hover { text-decoration: underline; }
         </style>
         {{if eq .Status "running"}}
         <meta http-equiv="refresh" content="3" />
         {{end}}
     </head>
     <body>
-        <h1>
+        <header class="header">
+            <a class="header-brand" href="/">
+                <div class="header-logo">F</div>
+                <span class="header-title">forge</span>
+                <span class="header-subtitle">Proxmox VM Manager</span>
+            </a>
+        </header>
+
+        <div class="page">
+            <div class="job-header">
+                {{if eq .Status "running"}}
+                <h1>
+                    {{if eq .Kind "destroy"}}<span class="spinner">⟳</span> Terminating…
+                    {{else}}<span class="spinner">⟳</span> Launching…
+                    {{end}}
+                </h1>
+                {{else if eq .Status "done"}}
+                <h1>{{if eq .Kind "destroy"}}✓ Termination complete{{else}}✓ Launch complete{{end}}</h1>
+                {{else}}
+                <h1>{{if eq .Kind "destroy"}}✗ Termination failed{{else}}✗ Launch failed{{end}}</h1>
+                {{end}}
+                <span class="badge badge-{{.Status}}">{{.Status}}</span>
+            </div>
+
+            <div class="card">
+                <div class="card-header">Job details</div>
+                <div class="card-body">
+                    <div class="info-grid">
+                        <div class="info-item">
+                            <div class="info-label">Job ID</div>
+                            <div class="info-value mono">{{.ID}}</div>
+                        </div>
+                        <div class="info-item">
+                            <div class="info-label">Operation</div>
+                            <div class="info-value">{{if eq .Kind "destroy"}}Terminate{{else}}Launch{{end}}</div>
+                        </div>
+                        <div class="info-item" style="grid-column: 1 / -1">
+                            <div class="info-label">{{if eq .Kind "destroy"}}Instance{{else}}Instances{{end}}</div>
+                            <div class="info-value" style="margin-top:4px">
+                                <ul class="instance-list">
+                                    {{range .Names}}<li>{{.}}</li>{{end}}
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             {{if eq .Status "running"}}
-                {{if eq .Kind "destroy"}}<span class="spinner">⟳</span> Terminating…
-                {{else}}<span class="spinner">⟳</span> Launching…
-                {{end}}
-            {{else if eq .Status "done"}}
-                {{if eq .Kind "destroy"}}✓ Termination complete
-                {{else}}✓ Launch complete
-                {{end}}
-            {{else}}
-                {{if eq .Kind "destroy"}}✗ Termination failed
-                {{else}}✗ Launch failed
-                {{end}}
+            <div class="hint-running">
+                <span class="spinner">⟳</span> &nbsp;Terraform is running. This page refreshes every 3 seconds.
+            </div>
             {{end}}
-        </h1>
 
-        <p>
-            Status: <span class="status-{{.Status}}">{{.Status}}</span>
-        </p>
+            {{if .Error}}
+            <div class="err-box">
+                <strong>Error</strong>
+                {{.Error}}
+            </div>
+            {{end}}
 
-        {{if eq .Kind "destroy"}}
-        <p>Instance being terminated: <strong>{{index .Names 0}}</strong></p>
-        {{else}}
-        <p>Instances being provisioned:</p>
-        <ul>
-            {{range .Names}}<li>{{.}}</li>{{end}}
-        </ul>
-        {{end}}
+            {{if .Logs}}
+            <div class="log-card">
+                <div class="card-header">Terraform output</div>
+                <pre>{{.Logs}}</pre>
+            </div>
+            {{else if eq .Status "running"}}
+            <div class="card">
+                <div class="card-body" style="color:var(--text-muted);font-size:13px">
+                    Logs will appear here once Terraform finishes.
+                </div>
+            </div>
+            {{end}}
 
-        {{if eq .Status "running"}}
-        <p style="color:#888">Terraform is running. This page refreshes every 3 seconds.</p>
-        {{end}}
-
-        {{if .Error}}
-        <div class="err">Error: {{.Error}}</div>
-        {{end}}
-
-        {{if .Logs}}
-        <h2>Terraform output</h2>
-        <pre>{{.Logs}}</pre>
-        {{else if eq .Status "running"}}
-        <p style="color:#888">Logs will appear here once Terraform finishes.</p>
-        {{end}}
-
-        <p><a href="/">← Back to instances</a></p>
+            <a class="back-link" href="/">← Back to instances</a>
+        </div>
     </body>
 </html>
