@@ -31,9 +31,18 @@
     </head>
     <body>
         <h1>
-            {{if eq .Status "running"}}<span class="spinner">⟳</span> Launching…
-            {{else if eq .Status "done"}}✓ Launch complete
-            {{else}}✗ Launch failed
+            {{if eq .Status "running"}}
+                {{if eq .Kind "destroy"}}<span class="spinner">⟳</span> Terminating…
+                {{else}}<span class="spinner">⟳</span> Launching…
+                {{end}}
+            {{else if eq .Status "done"}}
+                {{if eq .Kind "destroy"}}✓ Termination complete
+                {{else}}✓ Launch complete
+                {{end}}
+            {{else}}
+                {{if eq .Kind "destroy"}}✗ Termination failed
+                {{else}}✗ Launch failed
+                {{end}}
             {{end}}
         </h1>
 
@@ -41,10 +50,14 @@
             Status: <span class="status-{{.Status}}">{{.Status}}</span>
         </p>
 
+        {{if eq .Kind "destroy"}}
+        <p>Instance being terminated: <strong>{{index .Names 0}}</strong></p>
+        {{else}}
         <p>Instances being provisioned:</p>
         <ul>
             {{range .Names}}<li>{{.}}</li>{{end}}
         </ul>
+        {{end}}
 
         {{if eq .Status "running"}}
         <p style="color:#888">Terraform is running. This page refreshes every 3 seconds.</p>

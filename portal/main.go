@@ -86,10 +86,11 @@ var (
 	pveClient     *pve.Client
 )
 
-// Job tracks an async Terraform apply kicked off by handleLaunch.
+// Job tracks an async Terraform operation (launch or destroy).
 type Job struct {
-	ID     string
-	Names  []string // VM names being provisioned
+	ID    string
+	Names []string // VM names affected
+	Kind  string   // "launch" | "destroy"
 	mu     sync.Mutex
 	status string // "running" | "done" | "failed"
 	logs   string
@@ -119,10 +120,11 @@ var (
 	jobMap = map[string]*Job{}
 )
 
-func newJob(names []string) *Job {
+func newJob(kind string, names []string) *Job {
 	j := &Job{
 		ID:     fmt.Sprintf("%d", time.Now().UnixMilli()),
 		Names:  names,
+		Kind:   kind,
 		status: "running",
 	}
 	jobsMu.Lock()
@@ -221,27 +223,43 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 	}
 	wg.Wait()
 
-	// Append "launching" placeholder rows for any running jobs whose VMs
-	// aren't in state yet (Terraform hasn't written them yet).
-	existingNames := map[string]bool{}
-	for _, inst := range instances {
-		existingNames[inst.Name] = true
-	}
+	// Collect all running jobs.
 	jobsMu.Lock()
 	var runningJobs []*Job
 	for _, j := range jobMap {
 		runningJobs = append(runningJobs, j)
 	}
 	jobsMu.Unlock()
+
+	// For launch jobs: append placeholder rows for VMs not yet in state.
+	existingNames := map[string]bool{}
+	for _, inst := range instances {
+		existingNames[inst.Name] = true
+	}
 	for _, j := range runningJobs {
-		status, _, _ := j.snapshot()
-		if status != "running" {
+		if status, _, _ := j.snapshot(); status != "running" || j.Kind != "launch" {
 			continue
 		}
 		for _, name := range j.Names {
 			if !existingNames[name] {
 				instances = append(instances, Instance{Name: name, Status: "launching"})
 			}
+		}
+	}
+
+	// For destroy jobs: mark the target instance as "terminating" while the job runs.
+	terminatingNames := map[string]bool{}
+	for _, j := range runningJobs {
+		if status, _, _ := j.snapshot(); status != "running" || j.Kind != "destroy" {
+			continue
+		}
+		for _, name := range j.Names {
+			terminatingNames[name] = true
+		}
+	}
+	for i := range instances {
+		if terminatingNames[instances[i].Name] {
+			instances[i].Status = "terminating"
 		}
 	}
 
@@ -380,7 +398,7 @@ func handleLaunch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Pre-flight passed — create the job and hand off to a goroutine.
-	job := newJob(names)
+	job := newJob("launch", names)
 
 	go func() {
 		defer applyLock.Unlock()
@@ -411,6 +429,7 @@ func handleJob(w http.ResponseWriter, r *http.Request) {
 	_ = tmpl.ExecuteTemplate(w, "job.html", map[string]any{
 		"ID":     job.ID,
 		"Names":  job.Names,
+		"Kind":   job.Kind,
 		"Status": status,
 		"Logs":   logs,
 		"Error":  errMsg,
@@ -583,14 +602,15 @@ func handleDestroy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	applyLock.Lock()
-	defer applyLock.Unlock()
+	if !applyLock.TryLock() {
+		http.Error(w, "another operation is in progress; try again shortly", 409)
+		return
+	}
 
 	runner := tf.Runner{Dir: cfg.TerraformDir}
 	ctx, cancel := tf.DefaultTimeoutCtx()
-	defer cancel()
 
-	// Build var file with current state so credentials are present.
+	// Build var file with current state — synchronous pre-flight.
 	existingVMs := map[string]VMEntry{}
 	if show, err := runner.ShowJSON(ctx); err == nil {
 		existingVMs = extractVMsFromShow(show)
@@ -613,19 +633,23 @@ func handleDestroy(w http.ResponseWriter, r *http.Request) {
 	}
 	varFile, err := tf.WriteVarFileJSON(cfg.TerraformDir, varPayload)
 	if err != nil {
-		renderResult(w, Result{Error: err.Error()})
+		applyLock.Unlock()
+		cancel()
+		http.Error(w, "failed to write var file: "+err.Error(), 500)
 		return
 	}
 
+	job := newJob("destroy", []string{name})
 	target := fmt.Sprintf("proxmox_virtual_environment_vm.vm[%q]", name)
-	logs, err := runner.Destroy(ctx, target, varFile)
-	logs = stripANSI(logs)
-	if err != nil {
-		renderResult(w, Result{Logs: logs, Error: err.Error()})
-		return
-	}
 
-	renderResult(w, Result{Logs: logs})
+	go func() {
+		defer applyLock.Unlock()
+		defer cancel()
+		logs, err := runner.Destroy(ctx, target, varFile)
+		job.complete(stripANSI(logs), err)
+	}()
+
+	http.Redirect(w, r, "/?job="+job.ID, http.StatusSeeOther)
 }
 
 // handleToggleProtection adds or removes a VM from the protected list.

@@ -128,7 +128,11 @@
     <body>
         {{if .job}}
         <div class="banner">
+            {{if eq .job.Kind "destroy"}}
+            <span><span class="spinner">⟳</span> Terminating {{index .job.Names 0}} — this may take a minute.</span>
+            {{else}}
             <span><span class="spinner">⟳</span> Launching instances — this may take a few minutes.</span>
+            {{end}}
             <a href="/job/{{.job.ID}}">View progress →</a>
         </div>
         {{end}}
@@ -156,6 +160,15 @@
                     <td>—</td>
                     <td>—</td>
                     <td class="status-launching"><span class="spinner">⟳</span> launching</td>
+                    <td></td>
+                </tr>
+                {{else if eq .Status "terminating"}}
+                <tr style="opacity:0.6">
+                    <td>{{.Name}}</td>
+                    <td>{{.VMID}}</td>
+                    <td>{{.Node}}</td>
+                    <td>—</td>
+                    <td class="status-launching"><span class="spinner">⟳</span> terminating</td>
                     <td></td>
                 </tr>
                 {{else}}
