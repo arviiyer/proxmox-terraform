@@ -100,9 +100,39 @@
                 color: #888;
                 margin-left: 6px;
             }
+            .banner {
+                background: #fffbea;
+                border: 1px solid #f0c040;
+                border-radius: 8px;
+                padding: 12px 16px;
+                margin-bottom: 20px;
+                display: flex;
+                align-items: center;
+                gap: 12px;
+            }
+            .banner a {
+                margin-left: auto;
+                font-size: 13px;
+            }
+            .status-launching {
+                color: #888;
+                font-style: italic;
+            }
+            @keyframes spin { to { transform: rotate(360deg); } }
+            .spinner {
+                display: inline-block;
+                animation: spin 1s linear infinite;
+            }
         </style>
     </head>
     <body>
+        {{if .job}}
+        <div class="banner">
+            <span><span class="spinner">⟳</span> Launching instances — this may take a few minutes.</span>
+            <a href="/job/{{.job.ID}}">View progress →</a>
+        </div>
+        {{end}}
+
         <h1>Instances</h1>
         {{if .instances}}
         <table>
@@ -119,6 +149,16 @@
             <tbody>
                 {{range .instances}}
                 {{$protected := index $.protected .Name}}
+                {{if eq .Status "launching"}}
+                <tr style="opacity:0.6">
+                    <td>{{.Name}}</td>
+                    <td>—</td>
+                    <td>—</td>
+                    <td>—</td>
+                    <td class="status-launching"><span class="spinner">⟳</span> launching</td>
+                    <td></td>
+                </tr>
+                {{else}}
                 <tr>
                     <td>
                         {{.Name}}
@@ -151,6 +191,7 @@
                     </td>
                 </tr>
                 {{end}}
+                {{end}}
             </tbody>
         </table>
         {{else}}
@@ -182,6 +223,17 @@
             <input type="hidden" name="confirm" id="df-confirm" />
             <input type="hidden" name="override_confirm" id="df-override" />
         </form>
+
+        {{if .job}}
+        <script>
+            // Auto-refresh every 5s while a launch job is active, until it completes.
+            (function poll() {
+                fetch('/job/{{.job.ID}}', {headers: {'Accept': 'application/json'}})
+                    .catch(() => null);
+                setTimeout(function() { location.reload(); }, 5000);
+            })();
+        </script>
+        {{end}}
 
         <script>
             let _destroyName = '';

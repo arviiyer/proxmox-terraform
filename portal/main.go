@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	pve "github.com/arviiyer/proxmox-terraform/portal/internal/proxmox"
 	tf "github.com/arviiyer/proxmox-terraform/portal/internal/terraform"
@@ -85,6 +86,57 @@ var (
 	pveClient     *pve.Client
 )
 
+// Job tracks an async Terraform apply kicked off by handleLaunch.
+type Job struct {
+	ID     string
+	Names  []string // VM names being provisioned
+	mu     sync.Mutex
+	status string // "running" | "done" | "failed"
+	logs   string
+	errMsg string
+}
+
+func (j *Job) complete(logs string, err error) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	j.logs = logs
+	if err != nil {
+		j.status = "failed"
+		j.errMsg = err.Error()
+	} else {
+		j.status = "done"
+	}
+}
+
+func (j *Job) snapshot() (status, logs, errMsg string) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return j.status, j.logs, j.errMsg
+}
+
+var (
+	jobsMu sync.Mutex
+	jobMap = map[string]*Job{}
+)
+
+func newJob(names []string) *Job {
+	j := &Job{
+		ID:     fmt.Sprintf("%d", time.Now().UnixMilli()),
+		Names:  names,
+		status: "running",
+	}
+	jobsMu.Lock()
+	jobMap[j.ID] = j
+	jobsMu.Unlock()
+	return j
+}
+
+func getJob(id string) *Job {
+	jobsMu.Lock()
+	defer jobsMu.Unlock()
+	return jobMap[id]
+}
+
 func main() {
 	// Load config.json
 	b, err := os.ReadFile("config.json")
@@ -128,6 +180,7 @@ func main() {
 
 	http.HandleFunc("/", handleIndex)
 	http.HandleFunc("/launch", handleLaunch)
+	http.HandleFunc("/job/", handleJob)
 	http.HandleFunc("/destroy", handleDestroy)
 	http.HandleFunc("/start", handleStart)
 	http.HandleFunc("/stop", handleStop)
@@ -167,6 +220,36 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 	}
 	wg.Wait()
 
+	// Append "launching" placeholder rows for any running jobs whose VMs
+	// aren't in state yet (Terraform hasn't written them yet).
+	existingNames := map[string]bool{}
+	for _, inst := range instances {
+		existingNames[inst.Name] = true
+	}
+	jobsMu.Lock()
+	var runningJobs []*Job
+	for _, j := range jobMap {
+		runningJobs = append(runningJobs, j)
+	}
+	jobsMu.Unlock()
+	for _, j := range runningJobs {
+		status, _, _ := j.snapshot()
+		if status != "running" {
+			continue
+		}
+		for _, name := range j.Names {
+			if !existingNames[name] {
+				instances = append(instances, Instance{Name: name, Status: "launching"})
+			}
+		}
+	}
+
+	// Pass the job referenced by ?job= so the template can show a banner.
+	var activeJob *Job
+	if jobID := r.URL.Query().Get("job"); jobID != "" {
+		activeJob = getJob(jobID)
+	}
+
 	data := map[string]any{
 		"templates":     cfg.AllowedTemplates,
 		"instanceTypes": cfg.AllowedInstanceTypes,
@@ -174,6 +257,7 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 		"defaults":      cfg.Defaults,
 		"instances":     instances,
 		"protected":     loadProtected(),
+		"job":           activeJob,
 	}
 	_ = tmpl.ExecuteTemplate(w, "index.html", data)
 }
@@ -221,41 +305,48 @@ func handleLaunch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	applyLock.Lock()
-	defer applyLock.Unlock()
+	// Try to acquire the apply lock without blocking — reject if another apply is running.
+	if !applyLock.TryLock() {
+		http.Error(w, "another operation is in progress; try again shortly", 409)
+		return
+	}
+	// Lock is now held. Pre-flight runs synchronously; goroutine releases the lock when done.
 
 	runner := tf.Runner{Dir: cfg.TerraformDir}
-
 	ctx, cancel := tf.DefaultTimeoutCtx()
-	defer cancel()
 
-	// Init (idempotent)
+	// Init (idempotent) — synchronous so errors surface immediately.
 	if err := runner.Init(ctx); err != nil {
-		renderResult(w, Result{Error: err.Error()})
+		applyLock.Unlock()
+		cancel()
+		http.Error(w, "terraform init failed: "+err.Error(), 500)
 		return
 	}
 
-	// Read existing state so we can merge rather than replace
+	// Read existing state so we can merge rather than replace.
 	existingVMs := map[string]VMEntry{}
 	if show, err := runner.ShowJSON(ctx); err == nil {
 		existingVMs = extractVMsFromShow(show)
 	}
 
-	// Build new vms map: name -> VMEntry
+	// Build new vms map and collect expected names for the job.
 	newVMs := map[string]VMEntry{}
+	names := make([]string, form.Count)
 	for i := 0; i < form.Count; i++ {
 		name := fmt.Sprintf("%s-%02d", form.NamePrefix, i+1)
 		newVMs[name] = VMEntry{VMID: form.VMIDStart + i, Node: form.Node}
+		names[i] = name
 	}
 
-	// Conflict check + merge
+	// Conflict check + merge — synchronous so errors surface immediately.
 	vms, err := mergeVMs(existingVMs, newVMs)
 	if err != nil {
-		renderResult(w, Result{Error: err.Error()})
+		applyLock.Unlock()
+		cancel()
+		http.Error(w, err.Error(), 409)
 		return
 	}
 
-	// Create var-file payload matching Terraform variables
 	varPayload := map[string]any{
 		"template_vmid":    form.TemplateVMID,
 		"template_node":    cfg.Defaults.TemplateNode,
@@ -276,38 +367,48 @@ func handleLaunch(w http.ResponseWriter, r *http.Request) {
 
 	varFile, err := tf.WriteVarFileJSON(cfg.TerraformDir, varPayload)
 	if err != nil {
-		renderResult(w, Result{Error: err.Error()})
+		applyLock.Unlock()
+		cancel()
+		http.Error(w, "failed to write var file: "+err.Error(), 500)
 		return
 	}
 
-	logs, err := runner.Apply(ctx, varFile)
-	logs = stripANSI(logs)
+	// Pre-flight passed — create the job and hand off to a goroutine.
+	job := newJob(names)
 
-	if err != nil {
-		renderResult(w, Result{Logs: logs, Error: err.Error()})
+	go func() {
+		defer applyLock.Unlock()
+		defer cancel()
+
+		logs, err := runner.Apply(ctx, varFile)
+		logs = stripANSI(logs)
+		if err != nil {
+			job.complete(logs, err)
+			return
+		}
+		// Refresh-only to discover DHCP-assigned IPs.
+		_, _ = runner.RefreshOnly(ctx, varFile)
+		job.complete(logs, nil)
+	}()
+
+	http.Redirect(w, r, "/?job="+job.ID, http.StatusSeeOther)
+}
+
+func handleJob(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimPrefix(r.URL.Path, "/job/")
+	job := getJob(id)
+	if job == nil {
+		http.Error(w, "job not found", 404)
 		return
 	}
-
-	// Refresh-only to populate IPs (DHCP discovery lag)
-	_, _ = runner.RefreshOnly(ctx, varFile)
-
-	out, err := runner.OutputJSON(ctx)
-	if err != nil {
-		renderResult(w, Result{Logs: logs, Error: err.Error()})
-		return
-	}
-
-	outMeta, _ := out["instances"].(map[string]any)
-	instances := outMeta["value"]
-
-	pretty := ""
-	if b, err := json.MarshalIndent(instances, "", "  "); err == nil {
-		pretty = string(b)
-	} else {
-		pretty = fmt.Sprintf("%v", instances)
-	}
-
-	renderResult(w, Result{Logs: logs, InstancesJSON: pretty})
+	status, logs, errMsg := job.snapshot()
+	_ = tmpl.ExecuteTemplate(w, "job.html", map[string]any{
+		"ID":     job.ID,
+		"Names":  job.Names,
+		"Status": status,
+		"Logs":   logs,
+		"Error":  errMsg,
+	})
 }
 
 func parseLaunchForm(r *http.Request) (LaunchForm, error) {

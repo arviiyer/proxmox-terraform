@@ -1,0 +1,66 @@
+<!doctype html>
+<html>
+    <head>
+        <meta charset="utf-8" />
+        <title>Launching…</title>
+        <style>
+            body {
+                font-family: system-ui, sans-serif;
+                margin: 24px;
+                max-width: 900px;
+            }
+            pre {
+                background: #111;
+                color: #eee;
+                padding: 12px;
+                border-radius: 10px;
+                overflow: auto;
+                white-space: pre-wrap;
+            }
+            .status-running  { color: #b07000; font-weight: 600; }
+            .status-done     { color: #006600; font-weight: 600; }
+            .status-failed   { color: #b00020; font-weight: 600; }
+            .err { color: #b00020; font-weight: 700; margin-bottom: 12px; }
+            ul { margin: 4px 0 16px 0; }
+            @keyframes spin { to { transform: rotate(360deg); } }
+            .spinner { display: inline-block; animation: spin 1s linear infinite; }
+        </style>
+        {{if eq .Status "running"}}
+        <meta http-equiv="refresh" content="3" />
+        {{end}}
+    </head>
+    <body>
+        <h1>
+            {{if eq .Status "running"}}<span class="spinner">⟳</span> Launching…
+            {{else if eq .Status "done"}}✓ Launch complete
+            {{else}}✗ Launch failed
+            {{end}}
+        </h1>
+
+        <p>
+            Status: <span class="status-{{.Status}}">{{.Status}}</span>
+        </p>
+
+        <p>Instances being provisioned:</p>
+        <ul>
+            {{range .Names}}<li>{{.}}</li>{{end}}
+        </ul>
+
+        {{if eq .Status "running"}}
+        <p style="color:#888">Terraform is running. This page refreshes every 3 seconds.</p>
+        {{end}}
+
+        {{if .Error}}
+        <div class="err">Error: {{.Error}}</div>
+        {{end}}
+
+        {{if .Logs}}
+        <h2>Terraform output</h2>
+        <pre>{{.Logs}}</pre>
+        {{else if eq .Status "running"}}
+        <p style="color:#888">Logs will appear here once Terraform finishes.</p>
+        {{end}}
+
+        <p><a href="/">← Back to instances</a></p>
+    </body>
+</html>
