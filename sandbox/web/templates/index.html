@@ -112,8 +112,10 @@
             .badge-stopped .badge-dot { background: #9ca3af; }
             .badge-unknown   { background: var(--grey-bg); color: var(--grey); }
             .badge-unknown .badge-dot { background: #d1d5db; }
-            .badge-launching { background: var(--yellow-bg); color: var(--yellow); }
+            .badge-launching   { background: var(--yellow-bg); color: var(--yellow); }
             .badge-launching .badge-dot { background: var(--orange); animation: pulse 1.2s ease-in-out infinite; }
+            .badge-terminating { background: var(--red-bg); color: var(--red); }
+            .badge-terminating .badge-dot { background: var(--red); animation: pulse 1.2s ease-in-out infinite; }
 
             /* Banner */
             .banner {
@@ -269,7 +271,11 @@
         <div class="page">
             {{if .job}}
             <div class="banner">
+                {{if eq .job.Kind "destroy"}}
+                <span><span class="spinner">⟳</span> &nbsp;Terminating <strong>{{index .job.Names 0}}</strong> — this may take a minute.</span>
+                {{else}}
                 <span><span class="spinner">⟳</span> &nbsp;Launching <strong>{{index .job.Names 0}}{{if gt (len .job.Names) 1}}…{{end}}</strong> — this may take a minute.</span>
+                {{end}}
                 <a href="/job/{{.job.ID}}" style="color:var(--yellow);font-weight:600;text-decoration:none;font-size:13px">View progress →</a>
             </div>
             {{end}}
@@ -302,6 +308,15 @@
                             <td class="mono">—</td>
                             <td>—</td>
                             <td><span class="badge badge-launching"><span class="badge-dot"></span>launching</span></td>
+                            <td></td>
+                        </tr>
+                        {{else if eq .Status "terminating"}}
+                        <tr class="row-dim">
+                            <td><div class="name-cell"><span class="name-text">{{.Name}}</span></div></td>
+                            <td class="mono">{{.VMID}}</td>
+                            <td class="mono">{{.Node}}</td>
+                            <td>—</td>
+                            <td><span class="badge badge-terminating"><span class="badge-dot"></span>terminating</span></td>
                             <td></td>
                         </tr>
                         {{else}}
