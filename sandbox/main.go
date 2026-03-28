@@ -72,6 +72,7 @@ type LaunchForm struct {
 // Job tracks an in-progress Terraform apply so the dashboard can show a banner.
 type Job struct {
 	ID     string
+	Kind   string // "launch" or "destroy"
 	Names  []string
 	mu     sync.Mutex
 	done   bool
@@ -120,8 +121,8 @@ var (
 	jobMap       = map[string]*Job{}
 )
 
-func newJob(names []string) *Job {
-	j := &Job{ID: fmt.Sprintf("%d", time.Now().UnixNano()), Names: names}
+func newJob(kind string, names []string) *Job {
+	j := &Job{ID: fmt.Sprintf("%d", time.Now().UnixNano()), Kind: kind, Names: names}
 	jobsMu.Lock()
 	jobMap[j.ID] = j
 	jobsMu.Unlock()
@@ -224,14 +225,16 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 	}
 	wg.Wait()
 
-	// Resolve active job: show banner + placeholder rows only while still running.
+	// Resolve active job from URL — used for the banner.
 	var activeJob *Job
 	if jobID := r.URL.Query().Get("job"); jobID != "" {
 		if j := getJob(jobID); j != nil && !j.isDone() {
 			activeJob = j
 		}
 	}
-	if activeJob != nil {
+
+	// For launch jobs: add placeholder rows for VMs not yet in state.
+	if activeJob != nil && activeJob.Kind == "launch" {
 		for _, n := range activeJob.Names {
 			found := false
 			for _, inst := range instances {
@@ -242,6 +245,19 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 			}
 			if !found {
 				instances = append(instances, Instance{Name: n, Status: "launching"})
+			}
+		}
+	}
+
+	// For destroy jobs: mark the target instance as "terminating".
+	if activeJob != nil && activeJob.Kind == "destroy" {
+		terminating := map[string]bool{}
+		for _, n := range activeJob.Names {
+			terminating[n] = true
+		}
+		for i := range instances {
+			if terminating[instances[i].Name] {
+				instances[i].Status = "terminating"
 			}
 		}
 	}
@@ -348,7 +364,7 @@ func handleLaunch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	job := newJob(names)
+	job := newJob("launch", names)
 
 	go func() {
 		defer applyLock.Unlock()
@@ -399,7 +415,6 @@ func handleDestroy(w http.ResponseWriter, r *http.Request) {
 
 	runner := tf.Runner{Dir: cfg.TerraformDir}
 	ctx, cancel := tf.DefaultTimeoutCtx()
-	defer cancel()
 
 	existingVMs := map[string]VMEntry{}
 	if show, err := runner.ShowJSON(ctx); err == nil {
@@ -418,26 +433,31 @@ func handleDestroy(w http.ResponseWriter, r *http.Request) {
 	varFile, err := tf.WriteVarFileJSON(cfg.TerraformDir, varPayload)
 	if err != nil {
 		applyLock.Unlock()
+		cancel()
 		http.Error(w, "write var file: "+err.Error(), 500)
 		return
 	}
 
 	target := fmt.Sprintf("proxmox_virtual_environment_vm.vm[%q]", name)
-	logs, destroyErr := runner.Destroy(ctx, target, varFile)
-	applyLock.Unlock()
-	logs = stripANSI(logs)
+	job := newJob("destroy", []string{name})
 
-	// Remove from ephemeral list regardless of destroy outcome.
-	ephemeralMu.Lock()
-	eph := loadEphemeral()
-	delete(eph, name)
-	saveEphemeral(eph)
-	ephemeralMu.Unlock()
+	go func() {
+		defer applyLock.Unlock()
+		defer cancel()
+		logs, destroyErr := runner.Destroy(ctx, target, varFile)
+		logs = stripANSI(logs)
 
-	_ = tmpl.ExecuteTemplate(w, "result.html", map[string]any{
-		"Logs":  logs,
-		"Error": errStr(destroyErr),
-	})
+		// Remove from ephemeral list regardless of outcome.
+		ephemeralMu.Lock()
+		eph := loadEphemeral()
+		delete(eph, name)
+		saveEphemeral(eph)
+		ephemeralMu.Unlock()
+
+		job.complete(logs, destroyErr)
+	}()
+
+	http.Redirect(w, r, "/?job="+job.ID, http.StatusSeeOther)
 }
 
 // ── Start / Stop ───────────────────────────────────────────────────────────
@@ -572,11 +592,12 @@ func handleJob(w http.ResponseWriter, r *http.Request) {
 	}
 	status, logs, errMsg := job.snapshot()
 	_ = tmpl.ExecuteTemplate(w, "job.html", map[string]any{
-		"ID":    job.ID,
-		"Names": job.Names,
+		"ID":     job.ID,
+		"Kind":   job.Kind,
+		"Names":  job.Names,
 		"Status": status,
-		"Logs":  logs,
-		"Error": errMsg,
+		"Logs":   logs,
+		"Error":  errMsg,
 	})
 }
 
@@ -599,7 +620,7 @@ func handleConsole(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "vncproxy: "+err.Error(), 502)
 		return
 	}
-	log.Printf("console %s: vncproxy ok, port=%d", name, vnc.Port)
+	log.Printf("console %s: vncproxy ok, port=%s", name, vnc.Port)
 	_ = tmpl.ExecuteTemplate(w, "console.html", map[string]any{
 		"Name":   name,
 		"Ticket": vnc.Ticket,

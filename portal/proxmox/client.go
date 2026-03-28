@@ -74,9 +74,10 @@ func (c *Client) SetProtection(node string, vmid int, protect bool) error {
 }
 
 // VNCProxyResult holds the ticket and port returned by Proxmox's vncproxy API.
+// Port is a string because Proxmox returns it as a JSON string when websocket=1.
 type VNCProxyResult struct {
 	Ticket string `json:"ticket"`
-	Port   int    `json:"port"`
+	Port   string `json:"port"`
 	Cert   string `json:"cert"`
 }
 
