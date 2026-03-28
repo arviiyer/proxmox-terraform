@@ -21,11 +21,22 @@ After any OPNsense change: export config XML → commit to `homelab-projects/hom
 ## Sandbox — Current Deployment Status
 
 - **Container:** running on srv-apps port 8089, `restart: unless-stopped`, compose at `/srv/sandbox/`
+- **Build workflow:** Docker build context is `/home/arvind/repos/proxmox-terraform` on srv-apps (git clone of Forgejo). Always `git push forgejo master` first, then `git pull` on srv-apps, then `docker compose build --no-cache && docker compose up -d`. Changes to `/home/arvind/codebase/proxmox-terraform` on local machine do NOT auto-sync — must push+pull.
 - **PVE token:** `root@pam!sandbox` on summerset — ACLs: `/nodes/summerset` PVEVMAdmin, `/storage/local-lvm` PVEDatastoreAdmin, `/vms` PVEVMAdmin (needed for VM.Allocate on dest VMID), `/sdn/zones/localnetwork` PVESDNUser (SDN.Use checked on template NIC bridge even when clone overrides it), all privsep=1
-- **Phases complete:** 0–6 — fully deployed and externally accessible ✅
+- **Phases complete:** 0–6 plus UI polish — fully deployed, externally accessible, console working ✅
 - **Access:** `sandbox.arviiyer.dev` via CF Tunnel (privacy-lab, `a531fa13-40c3-45b2-a251-ee4e624d2cfb`) + CF Access (One-time PIN). Allowlist: `@toh.ca` domain + `rbarvind04@gmail.com`. toh.ca OTP emails blocked by their mail gateway — use Gmail OTP from corporate laptop.
 - **Security mitigations in place:** vmbr1 isolated bridge, iptables DROP on summerset (persisted via `sandbox-iptables.service`), dnsmasq DHCP-only on vmbr1 (`/etc/dnsmasq.d/vmbr1-sandbox.conf`, range 10.0.2.100–200), OPNsense block rules (10.0.2.0/24→LAN; summerset→Authentik; summerset→PBS), dedicated scoped PVE token
 - **Risk acceptance:** residual risks reviewed and accepted with due diligence (2026-03-28)
+
+## Sandbox — Known Gotchas (hard-won fixes, do not regress)
+
+- **VNCProxy port type:** Proxmox returns `port` as a JSON **string** when called with `websocket=1`. `VNCProxyResult.Port` is `string`, not `int`. Do not change it back to `int`.
+- **VNC ticket encoding:** Pass ticket to console.html template as `template.JS(json.Marshal(vnc.Ticket))` — NOT `vnc.Ticket` with `| js` in the template. Using `| js` causes double-escaping (html/template applies JS escaping on top of `| js`), turning `=` into the literal string `\u003D`, which Proxmox rejects with 401.
+- **WebSocket proxy path:** handleWS connects to `{pveHost}:8006` (NOT the raw vnc.Port number) and upgrades to `/api2/json/nodes/{node}/qemu/{vmid}/vncwebsocket?port={port}&vncticket={ticket}`. Ticket and port are passed via WS URL query params from console.html to avoid a second VNCProxy call (which generates a different ticket).
+- **Hijack flush:** After `hj.Hijack()`, call `clientBuf.Flush()` before starting the bidirectional relay, or the 101 response never reaches the client.
+- **PVE token ACLs needed for clone:** `/vms` (VM.Allocate on destination VMID) + `/sdn/zones/localnetwork` (SDN.Use on template's NIC bridge) — both required in addition to `/nodes/summerset` and `/storage/local-lvm`.
+- **Terraform state + build context:** sandbox-infra state lives at `/srv/sandbox/sandbox-infra/` (volume mount). If state gets out of sync with Proxmox, check tfstate manually. Never run terraform manually from outside the container against the same state file.
+- **Job pattern:** both launch and destroy use async jobs (redirect to `/?job=ID`). handleIndex reads `?job=` param, shows banner + placeholder launching/terminating rows. `/job/{id}` page shows Terraform output with 3s auto-refresh while running.
 
 ## What This Project Does
 
