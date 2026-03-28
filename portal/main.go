@@ -14,8 +14,8 @@ import (
 	"sync"
 	"time"
 
-	pve "github.com/arviiyer/proxmox-terraform/portal/internal/proxmox"
-	tf "github.com/arviiyer/proxmox-terraform/portal/internal/terraform"
+	pve "github.com/arviiyer/proxmox-terraform/portal/proxmox"
+	tf "github.com/arviiyer/proxmox-terraform/portal/terraform"
 )
 
 //go:embed web/templates/*.html

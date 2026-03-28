@@ -1,0 +1,563 @@
+<!doctype html>
+<html>
+    <head>
+        <meta charset="utf-8" />
+        <title>Sandbox — Malware Analysis</title>
+        <style>
+            *, *::before, *::after { box-sizing: border-box; }
+
+            :root {
+                --orange: #e47200;
+                --orange-dark: #c46000;
+                --header-bg: #1a1a2e;
+                --header-text: #f0f0f0;
+                --bg: #f4f5f7;
+                --surface: #ffffff;
+                --border: #dde1e7;
+                --text: #1a1a2e;
+                --text-muted: #6b7280;
+                --green: #16a34a;
+                --green-bg: #dcfce7;
+                --red: #b91c1c;
+                --red-bg: #fee2e2;
+                --yellow: #b45309;
+                --yellow-bg: #fef3c7;
+                --grey: #4b5563;
+                --grey-bg: #f3f4f6;
+                --blue: #1d4ed8;
+                --blue-bg: #eff6ff;
+                --purple: #6d28d9;
+                --purple-bg: #ede9fe;
+                --radius: 8px;
+                --shadow: 0 1px 3px rgba(0,0,0,0.1), 0 1px 2px rgba(0,0,0,0.06);
+            }
+
+            body {
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+                margin: 0;
+                background: var(--bg);
+                color: var(--text);
+                font-size: 14px;
+                line-height: 1.5;
+            }
+
+            /* Header */
+            .header {
+                background: var(--header-bg);
+                color: var(--header-text);
+                padding: 0 24px;
+                display: flex;
+                align-items: center;
+                height: 56px;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+            }
+            .header-brand {
+                display: flex; align-items: center; gap: 10px;
+                text-decoration: none; color: inherit;
+            }
+            .header-logo {
+                width: 28px; height: 28px;
+                background: var(--orange);
+                border-radius: 6px;
+                display: flex; align-items: center; justify-content: center;
+                font-size: 16px; font-weight: 700; color: white;
+            }
+            .header-title { font-size: 18px; font-weight: 700; letter-spacing: -0.3px; }
+            .header-subtitle { margin-left: 8px; color: #9ca3af; font-size: 13px; font-weight: 400; }
+
+            /* Layout */
+            .page { max-width: 1200px; margin: 0 auto; padding: 24px 24px 48px; }
+
+            /* Section heading */
+            .section-header {
+                display: flex; align-items: baseline; gap: 10px; margin: 0 0 12px;
+            }
+            .section-header h1, .section-header h2 {
+                margin: 0; font-size: 18px; font-weight: 700; color: var(--text);
+            }
+            .section-header .count { font-size: 13px; color: var(--text-muted); }
+
+            /* Card */
+            .card {
+                background: var(--surface);
+                border: 1px solid var(--border);
+                border-radius: var(--radius);
+                box-shadow: var(--shadow);
+                margin-bottom: 24px;
+                overflow: hidden;
+            }
+
+            /* Table */
+            table { width: 100%; border-collapse: collapse; }
+            thead { background: #f8f9fa; border-bottom: 1px solid var(--border); }
+            th {
+                text-align: left; padding: 10px 14px;
+                font-size: 12px; font-weight: 600; text-transform: uppercase;
+                letter-spacing: 0.05em; color: var(--text-muted); white-space: nowrap;
+            }
+            td { padding: 11px 14px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+            tbody tr:last-child td { border-bottom: none; }
+            tbody tr:hover { background: #fafafa; }
+
+            /* Badges */
+            .badge {
+                display: inline-flex; align-items: center; gap: 5px;
+                padding: 2px 9px; border-radius: 12px;
+                font-size: 11px; font-weight: 600; white-space: nowrap;
+            }
+            .badge-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+            .badge-running  { background: var(--green-bg); color: var(--green); }
+            .badge-running .badge-dot { background: var(--green); }
+            .badge-stopped  { background: var(--grey-bg); color: var(--grey); }
+            .badge-stopped .badge-dot { background: #9ca3af; }
+            .badge-unknown  { background: var(--grey-bg); color: var(--grey); }
+            .badge-unknown .badge-dot { background: #d1d5db; }
+
+            /* VM type badges */
+            .type-badge {
+                display: inline-flex; align-items: center; gap: 4px;
+                padding: 1px 8px; border-radius: 10px;
+                font-size: 11px; font-weight: 600;
+            }
+            .type-ephemeral { background: var(--yellow-bg); color: var(--yellow); }
+            .type-persistent { background: var(--blue-bg); color: var(--blue); }
+
+            @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.3; } }
+
+            /* Name cell */
+            .name-cell { display: flex; align-items: center; gap: 8px; }
+            .name-text { font-weight: 500; }
+
+            /* Mono */
+            .mono { font-family: "SF Mono","Fira Code",ui-monospace,monospace; font-size: 13px; }
+
+            /* Empty state */
+            .empty { padding: 40px 24px; text-align: center; color: var(--text-muted); }
+            .empty-icon { font-size: 32px; margin-bottom: 8px; }
+
+            /* Buttons */
+            .actions { display: flex; gap: 5px; flex-wrap: nowrap; align-items: center; }
+            .btn {
+                display: inline-flex; align-items: center; gap: 4px;
+                padding: 4px 10px; border-radius: 5px;
+                font-size: 12px; font-weight: 600; cursor: pointer;
+                border: 1px solid var(--border);
+                background: var(--surface); color: var(--text);
+                text-decoration: none; white-space: nowrap;
+                transition: background 0.1s, border-color 0.1s;
+                line-height: 1.4;
+            }
+            .btn:hover { background: #f1f3f5; border-color: #c0c6cf; }
+            .btn-start   { border-color: #86efac; background: #f0fdf4; color: var(--green); }
+            .btn-start:hover { background: #dcfce7; }
+            .btn-stop    { border-color: #fca5a5; background: #fff5f5; color: #dc2626; }
+            .btn-stop:hover  { background: var(--red-bg); }
+            .btn-danger  { border-color: #fca5a5; background: #fff5f5; color: var(--red); }
+            .btn-danger:hover { background: var(--red-bg); }
+            .btn-console { border-color: #93c5fd; background: #eff6ff; color: var(--blue); }
+            .btn-console:hover { background: #dbeafe; }
+            .btn-snap    { border-color: #c4b5fd; background: var(--purple-bg); color: var(--purple); }
+            .btn-snap:hover { background: #ddd6fe; }
+            .btn-primary {
+                background: var(--orange); border-color: var(--orange-dark);
+                color: white; padding: 9px 20px; font-size: 14px;
+            }
+            .btn-primary:hover { background: var(--orange-dark); }
+
+            form { display: inline; margin: 0; }
+
+            /* Launch form */
+            .form-card {
+                background: var(--surface); border: 1px solid var(--border);
+                border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden;
+            }
+            .form-card-header {
+                padding: 14px 20px; background: #f8f9fa;
+                border-bottom: 1px solid var(--border);
+                font-weight: 700; font-size: 14px; color: var(--text);
+            }
+            .form-body { padding: 20px; }
+            .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+            .form-group { display: flex; flex-direction: column; gap: 5px; }
+            .form-group.full { grid-column: 1 / -1; }
+            label {
+                font-size: 12px; font-weight: 600; color: var(--text-muted);
+                text-transform: uppercase; letter-spacing: 0.04em;
+            }
+            input[type="text"], input[type="number"], select {
+                width: 100%; padding: 8px 10px;
+                border: 1px solid var(--border); border-radius: 5px;
+                font-size: 14px; color: var(--text); background: var(--surface);
+                transition: border-color 0.15s, box-shadow 0.15s;
+                font-family: inherit;
+            }
+            input:focus, select:focus {
+                outline: none; border-color: var(--orange);
+                box-shadow: 0 0 0 3px rgba(228,114,0,0.15);
+            }
+            .hint { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+            .checkbox-row {
+                display: flex; align-items: center; gap: 8px; padding: 4px 0;
+            }
+            .checkbox-row input[type="checkbox"] { width: auto; margin: 0; accent-color: var(--orange); }
+            .checkbox-row label {
+                font-size: 13px; text-transform: none; letter-spacing: 0;
+                font-weight: 500; color: var(--text); cursor: pointer;
+            }
+            .form-footer {
+                padding: 16px 20px; background: #f8f9fa;
+                border-top: 1px solid var(--border);
+                display: flex; align-items: center; justify-content: flex-end; gap: 12px;
+            }
+            .ephemeral-warning {
+                font-size: 11px; color: var(--yellow); background: var(--yellow-bg);
+                padding: 6px 10px; border-radius: 5px; border: 1px solid #fde68a;
+                display: none; margin-top: 6px;
+            }
+            #ephemeral-cb:checked ~ .ephemeral-warning { display: block; }
+
+            /* Modals */
+            dialog {
+                border: 1px solid var(--border); border-radius: var(--radius);
+                padding: 0; box-shadow: 0 20px 60px rgba(0,0,0,0.15);
+                min-width: 360px; max-width: 90vw;
+            }
+            dialog::backdrop { background: rgba(0,0,0,0.4); }
+            .modal-header {
+                padding: 14px 20px; border-bottom: 1px solid var(--border);
+                display: flex; align-items: center; gap: 8px;
+            }
+            .modal-header h3 { margin: 0; font-size: 15px; font-weight: 700; }
+            .modal-body { padding: 16px 20px; }
+            .modal-body p { margin: 0 0 12px; color: var(--text-muted); font-size: 13px; }
+            .modal-body label { text-transform: uppercase; letter-spacing: 0.04em; }
+            .modal-body .inst-name {
+                font-family: ui-monospace, monospace; background: #f3f4f6;
+                padding: 2px 6px; border-radius: 4px; color: var(--text); font-size: 13px;
+            }
+            .modal-body input[type="text"], .modal-body select { margin-top: 2px; }
+            .modal-footer {
+                padding: 12px 20px; border-top: 1px solid var(--border);
+                display: flex; gap: 8px; justify-content: flex-end;
+            }
+            .modal-group { margin-bottom: 14px; display: flex; flex-direction: column; gap: 4px; }
+            .modal-group:last-child { margin-bottom: 0; }
+        </style>
+    </head>
+    <body>
+        <header class="header">
+            <a class="header-brand" href="/">
+                <div class="header-logo">S</div>
+                <span class="header-title">sandbox</span>
+                <span class="header-subtitle">Malware Analysis Provisioner</span>
+            </a>
+        </header>
+
+        <div class="page">
+            <!-- Instances table -->
+            <div class="section-header">
+                <h1>Instances</h1>
+                {{if .instances}}<span class="count">({{len .instances}})</span>{{end}}
+            </div>
+
+            <div class="card">
+                {{if .instances}}
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>VMID</th>
+                            <th>Node</th>
+                            <th>Type</th>
+                            <th>Status</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {{range .instances}}
+                        <tr>
+                            <td>
+                                <div class="name-cell">
+                                    <span class="name-text">{{.Name}}</span>
+                                </div>
+                            </td>
+                            <td class="mono">{{.VMID}}</td>
+                            <td class="mono">{{.Node}}</td>
+                            <td>
+                                {{if .Ephemeral}}
+                                <span class="type-badge type-ephemeral" title="Auto-destroyed when stopped">ephemeral</span>
+                                {{else}}
+                                <span class="type-badge type-persistent" title="Stays up until manually destroyed">persistent</span>
+                                {{end}}
+                            </td>
+                            <td>
+                                {{if eq .Status "running"}}
+                                <span class="badge badge-running"><span class="badge-dot"></span>running</span>
+                                {{else if eq .Status "stopped"}}
+                                <span class="badge badge-stopped"><span class="badge-dot"></span>stopped</span>
+                                {{else}}
+                                <span class="badge badge-unknown"><span class="badge-dot"></span>{{if .Status}}{{.Status}}{{else}}unknown{{end}}</span>
+                                {{end}}
+                            </td>
+                            <td>
+                                <div class="actions">
+                                    {{if eq .Status "stopped"}}
+                                    <form method="POST" action="/start">
+                                        <input type="hidden" name="name" value="{{.Name}}" />
+                                        <button class="btn btn-start" type="submit">▶ Start</button>
+                                    </form>
+                                    {{else if eq .Status "running"}}
+                                    <form method="POST" action="/stop">
+                                        <input type="hidden" name="name" value="{{.Name}}" />
+                                        <button class="btn btn-stop" type="submit">⏹ Stop</button>
+                                    </form>
+                                    {{end}}
+
+                                    <a class="btn btn-console" href="/console/{{.Name}}" target="_blank">Console</a>
+
+                                    <button class="btn btn-snap"
+                                        onclick="openSnapshotModal('{{.Name}}')">Snapshot</button>
+
+                                    <button class="btn btn-snap"
+                                        onclick="openRevertModal('{{.Name}}')">Revert</button>
+
+                                    <button class="btn btn-danger"
+                                        onclick="openDestroyModal('{{.Name}}')">Destroy</button>
+                                </div>
+                            </td>
+                        </tr>
+                        {{end}}
+                    </tbody>
+                </table>
+                {{else}}
+                <div class="empty">
+                    <div class="empty-icon">🧪</div>
+                    <div>No instances running. Launch one below.</div>
+                </div>
+                {{end}}
+            </div>
+
+            <!-- Snapshot modal -->
+            <dialog id="snapshot-modal">
+                <div class="modal-header">
+                    <span>📸</span>
+                    <h3>Take Snapshot</h3>
+                </div>
+                <div class="modal-body">
+                    <p>Create a snapshot of <span id="snap-vm-name" class="inst-name"></span>.</p>
+                    <div class="modal-group">
+                        <label for="snap-name-input">Snapshot Name</label>
+                        <input id="snap-name-input" type="text" placeholder="e.g. pre-detonation" autocomplete="off" />
+                    </div>
+                    <div class="modal-group">
+                        <label for="snap-desc-input">Description <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-muted)">(optional)</span></label>
+                        <input id="snap-desc-input" type="text" placeholder="Optional note" autocomplete="off" />
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn" onclick="document.getElementById('snapshot-modal').close()">Cancel</button>
+                    <button class="btn btn-snap" onclick="submitSnapshot()">Take Snapshot</button>
+                </div>
+            </dialog>
+
+            <form id="snapshot-form" method="POST" action="/snapshot" style="display:none">
+                <input type="hidden" name="name"        id="sf-name" />
+                <input type="hidden" name="snap_name"   id="sf-snap-name" />
+                <input type="hidden" name="description" id="sf-description" />
+            </form>
+
+            <!-- Revert modal -->
+            <dialog id="revert-modal">
+                <div class="modal-header">
+                    <span>⏮</span>
+                    <h3>Revert to Snapshot</h3>
+                </div>
+                <div class="modal-body">
+                    <p>Roll <span id="revert-vm-name" class="inst-name"></span> back to a snapshot. The VM will be stopped.</p>
+                    <div class="modal-group">
+                        <label for="revert-snap-select">Snapshot</label>
+                        <select id="revert-snap-select">
+                            <option value="">Loading…</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn" onclick="document.getElementById('revert-modal').close()">Cancel</button>
+                    <button class="btn btn-snap" onclick="submitRevert()">Revert</button>
+                </div>
+            </dialog>
+
+            <form id="revert-form" method="POST" action="/revert" style="display:none">
+                <input type="hidden" name="name"      id="rf-name" />
+                <input type="hidden" name="snap_name" id="rf-snap-name" />
+            </form>
+
+            <!-- Destroy modal -->
+            <dialog id="destroy-modal">
+                <div class="modal-header">
+                    <span>⚠️</span>
+                    <h3>Destroy Instance</h3>
+                </div>
+                <div class="modal-body">
+                    <p>You are about to permanently destroy <span id="destroy-vm-name" class="inst-name"></span>. This cannot be undone.</p>
+                    <div class="modal-group">
+                        <label for="destroy-confirm-input">Type the instance name to confirm</label>
+                        <input id="destroy-confirm-input" type="text" autocomplete="off" />
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn" onclick="document.getElementById('destroy-modal').close()">Cancel</button>
+                    <button class="btn btn-danger" onclick="submitDestroy()">Destroy</button>
+                </div>
+            </dialog>
+
+            <form id="destroy-form" method="POST" action="/destroy" style="display:none">
+                <input type="hidden" name="name"    id="df-name" />
+                <input type="hidden" name="confirm" id="df-confirm" />
+            </form>
+
+            <!-- Launch form -->
+            <div class="section-header" style="margin-top: 8px;">
+                <h2>Launch Instance</h2>
+            </div>
+
+            <div class="form-card">
+                <div class="form-card-header">Configure new sandbox VM</div>
+                <form method="POST" action="/launch">
+                    <div class="form-body">
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label>Template</label>
+                                <select name="template_vmid" required>
+                                    {{range .templates}}
+                                    <option value="{{.VMID}}">{{.Name}} (VMID {{.VMID}})</option>
+                                    {{end}}
+                                </select>
+                            </div>
+
+                            <div class="form-group">
+                                <label>Instance Type</label>
+                                <select name="instance_type" required>
+                                    {{range .instanceTypes}}
+                                    <option value="{{.}}" {{if eq . $.defaults.InstanceType}}selected{{end}}>{{.}}</option>
+                                    {{end}}
+                                </select>
+                            </div>
+
+                            <div class="form-group">
+                                <label>Name Prefix</label>
+                                <input name="name_prefix" type="text" placeholder="malware-analysis" required />
+                                <div class="hint">Creates prefix-01, prefix-02, …</div>
+                            </div>
+
+                            <div class="form-group">
+                                <label>VMID Start</label>
+                                <input name="vmid_start" type="number" min="100" max="999999" value="200" required />
+                                <div class="hint">Choose a free range not used by templates (8010–8040)</div>
+                            </div>
+
+                            <div class="form-group">
+                                <label>Count</label>
+                                <input name="count" type="number" min="1" max="10" value="1" />
+                            </div>
+
+                            <div class="form-group">
+                                <label>&nbsp;</label>
+                                <div>
+                                    <div class="checkbox-row">
+                                        <input type="checkbox" name="ephemeral" id="ephemeral-cb" />
+                                        <label for="ephemeral-cb">Ephemeral — auto-destroy when powered off</label>
+                                    </div>
+                                    <div class="ephemeral-warning" id="ephemeral-warning">
+                                        VM will be <strong>permanently destroyed</strong> once it stops running.
+                                        Use for one-shot malware detonation only.
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="form-footer">
+                        <button type="submit" class="btn btn-primary">Launch Instance</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <script>
+            // Ephemeral warning
+            document.getElementById('ephemeral-cb').addEventListener('change', function() {
+                document.getElementById('ephemeral-warning').style.display = this.checked ? 'block' : 'none';
+            });
+
+            // ── Snapshot modal ──
+            let _snapVM = '';
+            function openSnapshotModal(name) {
+                _snapVM = name;
+                document.getElementById('snap-vm-name').textContent = name;
+                document.getElementById('snap-name-input').value = '';
+                document.getElementById('snap-desc-input').value = '';
+                document.getElementById('snapshot-modal').showModal();
+            }
+            function submitSnapshot() {
+                const snapName = document.getElementById('snap-name-input').value.trim();
+                if (!snapName) { alert('Snapshot name is required.'); return; }
+                document.getElementById('sf-name').value = _snapVM;
+                document.getElementById('sf-snap-name').value = snapName;
+                document.getElementById('sf-description').value = document.getElementById('snap-desc-input').value.trim();
+                document.getElementById('snapshot-form').submit();
+            }
+
+            // ── Revert modal ──
+            let _revertVM = '';
+            async function openRevertModal(name) {
+                _revertVM = name;
+                document.getElementById('revert-vm-name').textContent = name;
+                const sel = document.getElementById('revert-snap-select');
+                sel.innerHTML = '<option value="">Loading…</option>';
+                document.getElementById('revert-modal').showModal();
+                try {
+                    const resp = await fetch('/snapshots/' + encodeURIComponent(name));
+                    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                    const snaps = await resp.json();
+                    if (!snaps || snaps.length === 0) {
+                        sel.innerHTML = '<option value="">(no snapshots)</option>';
+                        return;
+                    }
+                    sel.innerHTML = snaps.map(s =>
+                        `<option value="${escHtml(s.name)}">${escHtml(s.name)}${s.description ? ' — ' + escHtml(s.description) : ''}</option>`
+                    ).join('');
+                } catch (e) {
+                    sel.innerHTML = '<option value="">(error loading snapshots)</option>';
+                }
+            }
+            function submitRevert() {
+                const sel = document.getElementById('revert-snap-select');
+                const snapName = sel.value;
+                if (!snapName) { alert('Select a snapshot.'); return; }
+                document.getElementById('rf-name').value = _revertVM;
+                document.getElementById('rf-snap-name').value = snapName;
+                document.getElementById('revert-form').submit();
+            }
+
+            // ── Destroy modal ──
+            let _destroyVM = '';
+            function openDestroyModal(name) {
+                _destroyVM = name;
+                document.getElementById('destroy-vm-name').textContent = name;
+                document.getElementById('destroy-confirm-input').value = '';
+                document.getElementById('destroy-modal').showModal();
+            }
+            function submitDestroy() {
+                const confirm = document.getElementById('destroy-confirm-input').value;
+                if (confirm !== _destroyVM) { alert('Instance name does not match.'); return; }
+                document.getElementById('df-name').value = _destroyVM;
+                document.getElementById('df-confirm').value = confirm;
+                document.getElementById('destroy-form').submit();
+            }
+
+            function escHtml(s) {
+                return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+            }
+        </script>
+    </body>
+</html>
