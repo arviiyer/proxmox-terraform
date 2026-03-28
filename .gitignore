@@ -36,3 +36,4 @@ crash.*.log
 *.swp
 .DS_Store
 
+*.internal_*_apikey.txt
