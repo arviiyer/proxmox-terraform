@@ -1,0 +1,21 @@
+{
+  "terraform_dir": "../sandbox-infra",
+  "allowed_templates": [
+    {"name": "debian13-sandbox", "vmid": 8010},
+    {"name": "remnux",           "vmid": 8020},
+    {"name": "win11-sandbox",    "vmid": 8030},
+    {"name": "win11-flare",      "vmid": 8040}
+  ],
+  "allowed_instance_types": [
+    "sandbox-small",
+    "sandbox-medium",
+    "sandbox-large"
+  ],
+  "defaults": {
+    "node_name":     "summerset",
+    "template_node": "summerset",
+    "bridge":        "vmbr1",
+    "datastore":     "local-lvm",
+    "instance_type": "sandbox-medium"
+  }
+}

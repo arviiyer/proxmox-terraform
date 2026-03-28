@@ -8,7 +8,7 @@ Two Go web applications in the same repository:
 
 1. **forge** (`portal/`) — EC2-like interface for provisioning homelab VMs on Proxmox using Terraform. Accessible at `forge.arviiyer.dev` via Tailscale only. Users fill out a web form; the portal generates a Terraform vars file and runs `terraform apply` against the `infra/` directory.
 
-2. **sandbox** (`sandbox/`) — Malware analysis and reverse engineering VM provisioner. Accessible at `sandbox.arviiyer.dev` via Cloudflare Tunnel + Cloudflare Access (email OTP). Built for SOC/malware analysis work from devices that cannot run Tailscale (e.g. corporate laptop with AnyConnect VPN). Shares `internal/proxmox` and `internal/terraform` packages with forge but has its own Terraform directory (`sandbox-infra/`) and its own Proxmox API token scoped to skyrim only.
+2. **sandbox** (`sandbox/`) — Malware analysis and reverse engineering VM provisioner. Accessible at `sandbox.arviiyer.dev` via Cloudflare Tunnel + Cloudflare Access (email OTP). Built for SOC/malware analysis work from devices that cannot run Tailscale (e.g. corporate laptop with AnyConnect VPN). Shares `portal/proxmox` and `portal/terraform` packages with forge but has its own Terraform directory (`sandbox-infra/`) and its own Proxmox API token scoped to summerset only.
 
 ## Running and Building
 
@@ -41,8 +41,8 @@ Two components:
 
 **`portal/`** — Go HTTP server (no frameworks)
 - `main.go`: Handles `GET /` (instance listing + launch form), `POST /launch` (provision), `POST /destroy` (terminate), `POST /start`, `POST /stop`, `POST /toggle-protection` (lock/unlock). Uses `sync.Mutex` (`applyLock`) to prevent concurrent Terraform applies.
-- `internal/terraform/runner.go`: Wraps `terraform init`, `apply`, `apply -destroy`, `show -json`, `output -json`, and `refresh-only` via `os/exec`. Writes `portal.auto.tfvars.json` (0600) before each apply. Default timeout: 20 minutes.
-- `internal/proxmox/client.go`: Thin Proxmox REST API client for lightweight operations (start/stop/status) that don't warrant a Terraform apply. Uses `PVEAPIToken=` auth header, skips TLS verification (matches Terraform provider config).
+- `terraform/runner.go`: Wraps `terraform init`, `apply`, `apply -destroy`, `show -json`, `output -json`, and `refresh-only` via `os/exec`. Writes `portal.auto.tfvars.json` (0600) before each apply. Default timeout: 20 minutes.
+- `proxmox/client.go`: Thin Proxmox REST API client for lightweight operations (start/stop/status) that don't warrant a Terraform apply. Uses `PVEAPIToken=` auth header, skips TLS verification (matches Terraform provider config).
 - `config.json`: Defines allowed templates (name → VMID) and instance types. All user inputs validated against this allowlist.
 - `protected.json`: Runtime-managed list of protected VM names. Created automatically; do not edit manually while the portal is running.
 - `web/templates/`: `index.html` (instances table + launch form), `result.html` (Terraform logs).
@@ -90,6 +90,7 @@ sandbox/
   web/templates/
     index.html            # dashboard: running VMs + launch form
     result.html           # Terraform log output
+    console.html          # noVNC page (CDN) with embedded VNC ticket
 
 sandbox-infra/            # separate Terraform directory — own state, own defaults
   main.tf
@@ -98,7 +99,7 @@ sandbox-infra/            # separate Terraform directory — own state, own defa
   portal.auto.tfvars.json # runtime-generated, gitignored
 ```
 
-Shares `portal/internal/proxmox` and `portal/internal/terraform` packages directly. The terraform `Runner` takes a `Dir` field so it works unchanged against `sandbox-infra/`.
+Shares `portal/proxmox` and `portal/terraform` packages directly (moved out of internal/ so sandbox can import them). The terraform `Runner` takes a `Dir` field so it works unchanged against `sandbox-infra/`.
 
 ### VM Types
 
@@ -110,7 +111,7 @@ Shares `portal/internal/proxmox` and `portal/internal/terraform` packages direct
 - No protection toggle (not needed)
 - No user data / cloud-init upload
 - Ephemeral auto-destroy goroutine (not in forge)
-- Snapshot and revert support (new Proxmox API methods in `internal/proxmox/client.go`)
+- Snapshot and revert support (new Proxmox API methods in `portal/proxmox/client.go`)
 - In-browser console via WebSocket proxy (sandbox app proxies noVNC WebSocket to Proxmox node — Proxmox is never directly exposed to the internet)
 - All sandbox VMs run on **summerset node only** (`10.0.0.11`) on isolated bridge `vmbr1` (no LAN uplink, 10.0.2.0/24)
 - Uses a **dedicated limited PVE API token** scoped to summerset node only — not the same token as forge
@@ -177,8 +178,8 @@ Shares `portal/internal/proxmox` and `portal/internal/terraform` packages direct
 
 - **Phase 0** — Proxmox: ✅ create `vmbr1` on summerset, ✅ all 4 VM templates registered in config
 - **Phase 1** — Cloudflare: cloudflared tunnel on morrowind, CF Access policy, Caddy vhost
-- **Phase 2** — `sandbox-infra/`: Terraform directory with isolated bridge defaults, own state
-- **Phase 3** — Extend `internal/proxmox/client.go`: `ListSnapshots`, `CreateSnapshot`, `RevertSnapshot`
-- **Phase 4** — `sandbox/` Go binary: main.go, config.json, templates, ephemeral watcher, WS proxy
+- **Phase 2** — ✅ `sandbox-infra/`: Terraform directory with isolated bridge defaults, own state
+- **Phase 3** — ✅ Extend `portal/proxmox/client.go`: `ListSnapshots`, `CreateSnapshot`, `RevertSnapshot`
+- **Phase 4** — ✅ `sandbox/` Go binary: main.go, config.json, templates, ephemeral watcher, WS proxy
 - **Phase 5** — Deployment: Docker compose on srv-apps, Forgejo commit
 - **Phase 6** — Docs: update `tamriel-homelab-architecture.md` in homelab-projects
