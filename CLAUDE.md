@@ -165,14 +165,13 @@ Shares `portal/internal/proxmox` and `portal/internal/terraform` packages direct
 | 8010 | debian13-sandbox | ✅ Done | debian-13-standard, Tailscale/NodeExporter/Promtail removed |
 | 8020 | remnux | ✅ Done | REMnux Ubuntu Noble 24.04 (proxmox qcow2), cloud-init removed |
 | 8030 | win11-sandbox | ✅ Done | Win11 Pro, Defender/UAC/WU disabled, RDP on, VirtIO+QEMU agent |
-| 8040 | win11-flare | 🔄 In progress | Clone of 8030, FlareVM toolkit installing (~1-3h, multiple reboots) |
+| 8040 | win11-flare | ✅ Done | Clone of 8030, FlareVM toolkit (217 packages: x64dbg, FLOSS, dnSpy, BinDiff, etc.) |
 
-**win11-flare setup notes:**
-- FlareVM install.ps1 must run as a regular user (not SYSTEM) — autologon configured for `analyst` / `sandbox`
-- `vm-packages` Chocolatey source configured (MyGet): `https://www.myget.org/F/vm-packages/api/v2`
-- HKLM Run key pattern doesn't work reliably — use login autologon + HKLM Run to launch install.ps1 on first boot
-- After install completes: remove autologon password, shutdown, `qm template 8040`
-- Template must NOT be converted while FlareVM is still installing
+**win11-flare setup notes (for future re-creation):**
+- FlareVM install.ps1 must run as a regular user (not SYSTEM) — SYSTEM context breaks BoxStarter after Explorer restart
+- Set autologon for the user account, add HKLM Run key to launch install.ps1, reboot — BoxStarter continues through reboots automatically
+- `vm-packages` Chocolatey source (MyGet) is configured automatically by the script
+- After install: disable autologon, remove install scripts, shutdown, `qm template <vmid>`
 
 ### Implementation Phases
 
