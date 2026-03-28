@@ -2,6 +2,14 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Cross-Repo Context — Read These First
+
+Before starting any session involving deployment, infrastructure changes, or anything touching servers outside this repo, read:
+
+- `~/codebase/homelab-projects/CLAUDE.md` — cluster topology, critical constraints (SECRET_KEY, NFS gotchas, Caddy reload), deployment pattern, git workflow overview
+- `~/codebase/homelab-projects/tamriel-homelab-architecture.md` — authoritative IP/service/domain reference; update it whenever a VM, service, or Caddy vhost changes
+- `~/codebase/homelab-projects/self-hosted-git/git-workflow.md` — **required git workflow**: every config change on a server must be copied to `~/repos/<host>` and committed to the matching Forgejo repo (`homelab/<host>`) after the live edit
+
 ## What This Project Does
 
 Two Go web applications in the same repository:
