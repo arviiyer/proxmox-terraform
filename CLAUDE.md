@@ -2,9 +2,9 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Cross-Repo Context — Read These First
+## Cross-Repo Context — Read These at the Start of Every Session
 
-Before starting any session involving deployment, infrastructure changes, or anything touching servers outside this repo, read:
+**Read all three of these files at the start of every session, including after context compaction.** This context is frequently lost during compaction and must be re-loaded manually.
 
 - `~/codebase/homelab-projects/CLAUDE.md` — cluster topology, critical constraints (SECRET_KEY, NFS gotchas, Caddy reload), deployment pattern, git workflow overview
 - `~/codebase/homelab-projects/tamriel-homelab-architecture.md` — authoritative IP/service/domain reference; update it whenever a VM, service, or Caddy vhost changes
