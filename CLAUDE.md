@@ -112,8 +112,8 @@ Shares `portal/internal/proxmox` and `portal/internal/terraform` packages direct
 - Ephemeral auto-destroy goroutine (not in forge)
 - Snapshot and revert support (new Proxmox API methods in `internal/proxmox/client.go`)
 - In-browser console via WebSocket proxy (sandbox app proxies noVNC WebSocket to Proxmox node — Proxmox is never directly exposed to the internet)
-- All sandbox VMs run on **skyrim node only** (`10.0.0.12`) on isolated bridge `vmbr1` (no LAN uplink)
-- Uses a **dedicated limited PVE API token** scoped to skyrim node only — not the same token as forge
+- All sandbox VMs run on **summerset node only** (`10.0.0.11`) on isolated bridge `vmbr1` (no LAN uplink, 10.0.2.0/24)
+- Uses a **dedicated limited PVE API token** scoped to summerset node only — not the same token as forge
 - `terraform.Runner{Dir: "../sandbox-infra"}` (not `../infra`)
 
 ### Routes
@@ -140,27 +140,43 @@ Shares `portal/internal/proxmox` and `portal/internal/terraform` packages direct
 ### Deployment
 
 - Docker container on srv-apps, port `8089`, at `/srv/sandbox/`
-- Same env vars as forge (`PVE_ENDPOINT`, `PVE_API_TOKEN`, `SSH_PUBLIC_KEY`) but `PVE_API_TOKEN` is a different token scoped to skyrim
+- Same env vars as forge (`PVE_ENDPOINT`, `PVE_API_TOKEN`, `SSH_PUBLIC_KEY`) but `PVE_API_TOKEN` is a different token scoped to summerset
 - Compose file committed to `homelab/srv-apps` Forgejo repo
 
 ### Security Mitigations
 
 | Mitigation | Detail |
 |---|---|
-| Dedicated PVE API token | Scoped to skyrim node only, VM operations only — not the forge token |
-| Sandbox VMs on skyrim only | Isolates VM escape blast radius to the least critical node |
-| vmbr1 isolated bridge | No physical NIC attached, no uplink — air-gapped from LAN |
+| Dedicated PVE API token | Scoped to summerset node only, VM operations only — not the forge token |
+| Sandbox VMs on summerset only | Isolates VM escape blast radius; skyrim ruled out (iGPU VRAM leaves only 2GB free) |
+| vmbr1 isolated bridge | On summerset: no physical NIC attached, no uplink — air-gapped from LAN (10.0.2.0/24) |
 | OPNsense: block sandbox range → LAN | `10.0.2.0/24` → `10.0.0.0/24` blocked as backstop against IP forwarding misconfiguration |
-| OPNsense: block skyrim → critical VMs | Limits post-escape lateral movement from skyrim to homelab services |
+| OPNsense: block summerset → critical VMs | Limits post-escape lateral movement from summerset to homelab services |
 | OPNsense: sandbox egress allow-list | If internet enabled for detonation: allow WAN, block all RFC1918 |
 | No IP forwarding on skyrim | `net.ipv4.ip_forward = 0` verified after setup |
 | WebSocket proxy (no Proxmox exposure) | Console access proxied through sandbox app — Proxmox never behind CF Tunnel |
 | CF Access session limit | 8-hour sessions, Purpose Justification prompt enabled |
 | Input allowlisting | Templates and VM sizes validated against `config.json` before any Terraform operation |
 
+### Sandbox VM Templates (on summerset)
+
+| VMID | Name | Status | Notes |
+|---|---|---|---|
+| 8010 | debian13-sandbox | ✅ Done | debian-13-standard, Tailscale/NodeExporter/Promtail removed |
+| 8020 | remnux | ✅ Done | REMnux Ubuntu Noble 24.04 (proxmox qcow2), cloud-init removed |
+| 8030 | win11-sandbox | ✅ Done | Win11 Pro, Defender/UAC/WU disabled, RDP on, VirtIO+QEMU agent |
+| 8040 | win11-flare | 🔄 In progress | Clone of 8030, FlareVM toolkit installing (~1-3h, multiple reboots) |
+
+**win11-flare setup notes:**
+- FlareVM install.ps1 must run as a regular user (not SYSTEM) — autologon configured for `analyst` / `sandbox`
+- `vm-packages` Chocolatey source configured (MyGet): `https://www.myget.org/F/vm-packages/api/v2`
+- HKLM Run key pattern doesn't work reliably — use login autologon + HKLM Run to launch install.ps1 on first boot
+- After install completes: remove autologon password, shutdown, `qm template 8040`
+- Template must NOT be converted while FlareVM is still installing
+
 ### Implementation Phases
 
-- **Phase 0** — Proxmox: create `vmbr1` on skyrim, verify/register analysis templates in config
+- **Phase 0** — Proxmox: ✅ create `vmbr1` on summerset, ✅ all 4 VM templates registered in config
 - **Phase 1** — Cloudflare: cloudflared tunnel on morrowind, CF Access policy, Caddy vhost
 - **Phase 2** — `sandbox-infra/`: Terraform directory with isolated bridge defaults, own state
 - **Phase 3** — Extend `internal/proxmox/client.go`: `ListSnapshots`, `CreateSnapshot`, `RevertSnapshot`
