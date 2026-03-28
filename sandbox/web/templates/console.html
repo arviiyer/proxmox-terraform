@@ -57,7 +57,7 @@
         <script type="module">
             import RFB from 'https://cdn.jsdelivr.net/npm/@novnc/novnc@1.4.0/core/rfb.js';
 
-            const ticket = {{.Ticket | js}};
+            const ticket = {{.Ticket}};
             const port   = {{.Port}};
             const proto  = location.protocol === 'https:' ? 'wss:' : 'ws:';
             const wsUrl  = proto + '//' + location.host + '/ws/{{.Name}}?ticket=' + encodeURIComponent(ticket) + '&port=' + port;
