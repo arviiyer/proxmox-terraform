@@ -69,6 +69,21 @@ type LaunchForm struct {
 	Ephemeral    bool
 }
 
+// Job tracks an in-progress Terraform apply so the dashboard can show a banner.
+type Job struct {
+	ID    string
+	Names []string
+	mu    sync.Mutex
+	done  bool
+}
+
+func (j *Job) complete() { j.mu.Lock(); j.done = true; j.mu.Unlock() }
+func (j *Job) isDone() bool {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return j.done
+}
+
 var (
 	cfg          Config
 	tmpl         *template.Template
@@ -78,7 +93,23 @@ var (
 	sshNodeKey   string
 	pveClient    *pve.Client
 	ephemeralMu  sync.Mutex
+	jobsMu       sync.Mutex
+	jobMap       = map[string]*Job{}
 )
+
+func newJob(names []string) *Job {
+	j := &Job{ID: fmt.Sprintf("%d", time.Now().UnixNano()), Names: names}
+	jobsMu.Lock()
+	jobMap[j.ID] = j
+	jobsMu.Unlock()
+	return j
+}
+
+func getJob(id string) *Job {
+	jobsMu.Lock()
+	defer jobsMu.Unlock()
+	return jobMap[id]
+}
 
 func main() {
 	b, err := os.ReadFile("config.json")
@@ -168,11 +199,34 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 	}
 	wg.Wait()
 
+	// Resolve active job: show banner + placeholder rows only while still running.
+	var activeJob *Job
+	if jobID := r.URL.Query().Get("job"); jobID != "" {
+		if j := getJob(jobID); j != nil && !j.isDone() {
+			activeJob = j
+		}
+	}
+	if activeJob != nil {
+		for _, n := range activeJob.Names {
+			found := false
+			for _, inst := range instances {
+				if inst.Name == n {
+					found = true
+					break
+				}
+			}
+			if !found {
+				instances = append(instances, Instance{Name: n, Status: "launching"})
+			}
+		}
+	}
+
 	_ = tmpl.ExecuteTemplate(w, "index.html", map[string]any{
 		"templates":     cfg.AllowedTemplates,
 		"instanceTypes": cfg.AllowedInstanceTypes,
 		"defaults":      cfg.Defaults,
 		"instances":     instances,
+		"job":           activeJob,
 	})
 }
 
@@ -269,6 +323,8 @@ func handleLaunch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	job := newJob(names)
+
 	go func() {
 		defer applyLock.Unlock()
 		defer cancel()
@@ -286,18 +342,12 @@ func handleLaunch(w http.ResponseWriter, r *http.Request) {
 			ephemeralMu.Unlock()
 		}
 
-		// Render result page via a redirect isn't great for async, so we log and
-		// the user can refresh. For simplicity sandbox uses synchronous launch
-		// (waits for apply to finish, then redirects). Goroutine handles the apply;
-		// we use a job cookie approach below.
 		_ = logs
 		_ = applyErr
+		job.complete()
 	}()
 
-	// For sandbox we redirect immediately (the goroutine runs apply in bg).
-	// A more robust approach would use the job pattern from forge, but for
-	// a single-user sandbox tool a simple redirect works fine.
-	http.Redirect(w, r, "/", http.StatusSeeOther)
+	http.Redirect(w, r, "/?job="+job.ID, http.StatusSeeOther)
 }
 
 // ── Destroy ────────────────────────────────────────────────────────────────
@@ -506,9 +556,10 @@ func handleConsole(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "vncproxy: "+err.Error(), 502)
 		return
 	}
-	_ = tmpl.ExecuteTemplate(w, "console.html", map[string]string{
+	_ = tmpl.ExecuteTemplate(w, "console.html", map[string]any{
 		"Name":   name,
 		"Ticket": vnc.Ticket,
+		"Port":   vnc.Port,
 	})
 }
 
@@ -531,29 +582,37 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	vnc, err := pveClient.VNCProxy(entry.Node, entry.VMID)
-	if err != nil {
-		http.Error(w, "vncproxy: "+err.Error(), 502)
+	// Ticket and port are passed as query params by console.html to avoid a
+	// second VNCProxy call (which would generate a different ticket).
+	ticket := r.URL.Query().Get("ticket")
+	vncPort := r.URL.Query().Get("port")
+	if ticket == "" || vncPort == "" {
+		http.Error(w, "ticket and port required", 400)
 		return
 	}
 
-	// Connect to Proxmox VNC WebSocket (direct to node, bypassing reverse proxy).
-	proxHost := extractHostname(pveEndpoint)
-	targetAddr := fmt.Sprintf("%s:%d", proxHost, vnc.Port)
+	// Connect to Proxmox HTTPS API on port 8006.
+	u, _ := url.Parse(pveEndpoint)
+	targetAddr := u.Host // e.g. "10.0.0.11:8006"
+	if u.Port() == "" {
+		targetAddr = u.Hostname() + ":8006"
+	}
 	upstream, err := tls.Dial("tcp", targetAddr, &tls.Config{InsecureSkipVerify: true})
 	if err != nil {
 		http.Error(w, "upstream connect: "+err.Error(), 502)
 		return
 	}
 
-	// Upgrade our connection to Proxmox.
+	// Upgrade our connection to Proxmox via the vncwebsocket path.
+	vncPath := fmt.Sprintf("/api2/json/nodes/%s/qemu/%d/vncwebsocket?port=%s&vncticket=%s",
+		entry.Node, entry.VMID, vncPort, url.QueryEscape(ticket))
 	nonce := make([]byte, 16)
 	rand.Read(nonce)
 	wsKey := base64.StdEncoding.EncodeToString(nonce)
 	fmt.Fprintf(upstream,
-		"GET / HTTP/1.1\r\nHost: %s\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"+
+		"GET %s HTTP/1.1\r\nHost: %s\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"+
 			"Sec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Protocol: binary\r\n\r\n",
-		targetAddr, wsKey)
+		vncPath, targetAddr, wsKey)
 
 	upstreamBuf := bufio.NewReader(upstream)
 	if err := consumeHTTPHeaders(upstreamBuf); err != nil {
