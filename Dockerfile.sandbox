@@ -1,0 +1,28 @@
+# syntax=docker/dockerfile:1
+
+# ── Stage 1: build the sandbox binary ─────────────────────────────────────────
+FROM golang:1.25-alpine AS builder
+WORKDIR /src
+# Copy both portal/ (shared packages) and sandbox/ (the binary)
+COPY portal/ ./portal/
+COPY sandbox/ ./sandbox/
+# Build the sandbox binary — go.mod uses a replace directive pointing to ../portal
+WORKDIR /src/sandbox
+RUN go build -o sandbox .
+
+# ── Stage 2: pull Terraform binary from official image ────────────────────────
+FROM hashicorp/terraform:1.10 AS terraform
+
+# ── Stage 3: minimal runtime image ────────────────────────────────────────────
+FROM debian:bookworm-slim
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder   /src/sandbox/sandbox  /app/sandbox
+COPY --from=terraform /bin/terraform        /usr/local/bin/terraform
+
+WORKDIR /app
+EXPOSE 8089
+CMD ["/app/sandbox"]
