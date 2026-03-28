@@ -58,8 +58,9 @@
             import RFB from 'https://cdn.jsdelivr.net/npm/@novnc/novnc@1.4.0/core/rfb.js';
 
             const ticket = {{.Ticket | js}};
+            const port   = {{.Port}};
             const proto  = location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const wsUrl  = proto + '//' + location.host + '/ws/{{.Name}}';
+            const wsUrl  = proto + '//' + location.host + '/ws/{{.Name}}?ticket=' + encodeURIComponent(ticket) + '&port=' + port;
             const status = document.getElementById('status');
 
             const rfb = new RFB(document.getElementById('screen'), wsUrl, {
