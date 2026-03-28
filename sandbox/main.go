@@ -682,8 +682,9 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 	wsKey := base64.StdEncoding.EncodeToString(nonce)
 	fmt.Fprintf(upstream,
 		"GET %s HTTP/1.1\r\nHost: %s\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"+
-			"Sec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Protocol: binary\r\n\r\n",
-		vncPath, targetAddr, wsKey)
+			"Sec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Protocol: binary\r\n"+
+			"Authorization: PVEAPIToken=%s\r\n\r\n",
+		vncPath, targetAddr, wsKey, pveAPIToken)
 
 	upstreamBuf := bufio.NewReader(upstream)
 	if err := consumeHTTPHeaders(upstreamBuf); err != nil {
