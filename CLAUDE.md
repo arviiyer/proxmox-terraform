@@ -10,6 +10,25 @@ Before starting any session involving deployment, infrastructure changes, or any
 - `~/codebase/homelab-projects/tamriel-homelab-architecture.md` — authoritative IP/service/domain reference; update it whenever a VM, service, or Caddy vhost changes
 - `~/codebase/homelab-projects/self-hosted-git/git-workflow.md` — **required git workflow**: every config change on a server must be copied to `~/repos/<host>` and committed to the matching Forgejo repo (`homelab/<host>`) after the live edit
 
+## OPNsense API Access
+
+OPNsense (10.0.0.1) API key is at `~/codebase/proxmox-terraform/oblivian.internal_root_apikey.txt` (gitignored — never commit).
+Usage: `curl -sk -u "$KEY:$SECRET" https://10.0.0.1/api/...`
+Apply rules after changes: `POST /api/firewall/filter/apply`
+Export config: `GET /api/core/backup/download/this`
+After any OPNsense change: export config XML → commit to `homelab-projects/homelab-network/config/config-YYYY-MM-DD.xml`.
+
+## Sandbox — Current Deployment Status
+
+- **Container:** running on srv-apps port 8089, `restart: unless-stopped`, compose at `/srv/sandbox/`
+- **PVE token:** `root@pam!sandbox` on summerset — scoped to `/nodes/summerset` (PVEVMAdmin) + `/storage/local-lvm` (PVEDatastoreAdmin) only
+- **Phases complete:** 0 (templates), 1 (Caddy vhost — partial), 2 (sandbox-infra/), 3 (proxmox client), 4 (Go binary + templates), 5 (Docker deployment)
+- **Remaining before going external:**
+  1. CF Zero Trust dashboard — add public hostname `sandbox.arviiyer.dev → http://10.0.0.83:8089`, create Access policy (email OTP, work email, 8h session) — **manual step, user must do this**
+  2. Phase 6 — update `tamriel-homelab-architecture.md` (ongoing)
+- **Security mitigations in place:** vmbr1 isolated bridge, iptables DROP on summerset, dnsmasq DHCP-only on vmbr1 (`/etc/dnsmasq.d/vmbr1-sandbox.conf`, range 10.0.2.100–200), OPNsense block rules (10.0.2.0/24→LAN; summerset→Authentik; summerset→PBS), dedicated scoped PVE token
+- **Risk acceptance:** residual risks reviewed and accepted with due diligence (2026-03-28)
+
 ## What This Project Does
 
 Two Go web applications in the same repository:
