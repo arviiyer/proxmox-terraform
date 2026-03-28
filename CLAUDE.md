@@ -22,11 +22,9 @@ After any OPNsense change: export config XML → commit to `homelab-projects/hom
 
 - **Container:** running on srv-apps port 8089, `restart: unless-stopped`, compose at `/srv/sandbox/`
 - **PVE token:** `root@pam!sandbox` on summerset — scoped to `/nodes/summerset` (PVEVMAdmin) + `/storage/local-lvm` (PVEDatastoreAdmin) only
-- **Phases complete:** 0 (templates), 1 (Caddy vhost — partial), 2 (sandbox-infra/), 3 (proxmox client), 4 (Go binary + templates), 5 (Docker deployment)
-- **Remaining before going external:**
-  1. CF Zero Trust dashboard — add public hostname `sandbox.arviiyer.dev → http://10.0.0.83:8089`, create Access policy (email OTP, work email, 8h session) — **manual step, user must do this**
-  2. Phase 6 — update `tamriel-homelab-architecture.md` (ongoing)
-- **Security mitigations in place:** vmbr1 isolated bridge, iptables DROP on summerset, dnsmasq DHCP-only on vmbr1 (`/etc/dnsmasq.d/vmbr1-sandbox.conf`, range 10.0.2.100–200), OPNsense block rules (10.0.2.0/24→LAN; summerset→Authentik; summerset→PBS), dedicated scoped PVE token
+- **Phases complete:** 0–6 — fully deployed and externally accessible ✅
+- **Access:** `sandbox.arviiyer.dev` via CF Tunnel (privacy-lab, `a531fa13-40c3-45b2-a251-ee4e624d2cfb`) + CF Access (One-time PIN). Allowlist: `@toh.ca` domain + `rbarvind04@gmail.com`. toh.ca OTP emails blocked by their mail gateway — use Gmail OTP from corporate laptop.
+- **Security mitigations in place:** vmbr1 isolated bridge, iptables DROP on summerset (persisted via `sandbox-iptables.service`), dnsmasq DHCP-only on vmbr1 (`/etc/dnsmasq.d/vmbr1-sandbox.conf`, range 10.0.2.100–200), OPNsense block rules (10.0.2.0/24→LAN; summerset→Authentik; summerset→PBS), dedicated scoped PVE token
 - **Risk acceptance:** residual risks reviewed and accepted with due diligence (2026-03-28)
 
 ## What This Project Does
