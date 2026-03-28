@@ -621,9 +621,12 @@ func handleConsole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	log.Printf("console %s: vncproxy ok, port=%s", name, vnc.Port)
+	// Marshal ticket as a JSON string literal so html/template doesn't re-escape it.
+	// Using | js in the template double-escapes (= → \u003D → literal \u003D in JS).
+	ticketJSON, _ := json.Marshal(vnc.Ticket)
 	_ = tmpl.ExecuteTemplate(w, "console.html", map[string]any{
 		"Name":   name,
-		"Ticket": vnc.Ticket,
+		"Ticket": template.JS(ticketJSON),
 		"Port":   vnc.Port,
 	})
 }
