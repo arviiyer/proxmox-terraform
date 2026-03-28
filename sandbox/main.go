@@ -71,13 +71,36 @@ type LaunchForm struct {
 
 // Job tracks an in-progress Terraform apply so the dashboard can show a banner.
 type Job struct {
-	ID    string
-	Names []string
-	mu    sync.Mutex
-	done  bool
+	ID     string
+	Names  []string
+	mu     sync.Mutex
+	done   bool
+	logs   string
+	errMsg string
 }
 
-func (j *Job) complete() { j.mu.Lock(); j.done = true; j.mu.Unlock() }
+func (j *Job) complete(logs string, err error) {
+	j.mu.Lock()
+	j.done = true
+	j.logs = logs
+	if err != nil {
+		j.errMsg = err.Error()
+	}
+	j.mu.Unlock()
+}
+
+func (j *Job) snapshot() (status, logs, errMsg string) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if !j.done {
+		return "running", "", ""
+	}
+	if j.errMsg != "" {
+		return "failed", j.logs, j.errMsg
+	}
+	return "done", j.logs, ""
+}
+
 func (j *Job) isDone() bool {
 	j.mu.Lock()
 	defer j.mu.Unlock()
@@ -145,6 +168,7 @@ func main() {
 		"web/templates/index.html",
 		"web/templates/result.html",
 		"web/templates/console.html",
+		"web/templates/job.html",
 	))
 
 	http.HandleFunc("/", handleIndex)
@@ -155,6 +179,7 @@ func main() {
 	http.HandleFunc("/snapshot", handleSnapshot)
 	http.HandleFunc("/revert", handleRevert)
 	http.HandleFunc("/snapshots/", handleListSnapshots) // GET /snapshots/{name} → JSON
+	http.HandleFunc("/job/", handleJob)
 	http.HandleFunc("/console/", handleConsole)
 	http.HandleFunc("/ws/", handleWS)
 	http.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok")) })
@@ -342,9 +367,7 @@ func handleLaunch(w http.ResponseWriter, r *http.Request) {
 			ephemeralMu.Unlock()
 		}
 
-		_ = logs
-		_ = applyErr
-		job.complete()
+		job.complete(logs, applyErr)
 	}()
 
 	http.Redirect(w, r, "/?job="+job.ID, http.StatusSeeOther)
@@ -538,6 +561,25 @@ func handleListSnapshots(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(snaps)
 }
 
+// ── Job progress page ──────────────────────────────────────────────────────
+
+func handleJob(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimPrefix(r.URL.Path, "/job/")
+	job := getJob(id)
+	if job == nil {
+		http.Error(w, "job not found", 404)
+		return
+	}
+	status, logs, errMsg := job.snapshot()
+	_ = tmpl.ExecuteTemplate(w, "job.html", map[string]any{
+		"ID":    job.ID,
+		"Names": job.Names,
+		"Status": status,
+		"Logs":  logs,
+		"Error": errMsg,
+	})
+}
+
 // ── Console (noVNC) ────────────────────────────────────────────────────────
 
 func handleConsole(w http.ResponseWriter, r *http.Request) {
@@ -553,9 +595,11 @@ func handleConsole(w http.ResponseWriter, r *http.Request) {
 	}
 	vnc, err := pveClient.VNCProxy(entry.Node, entry.VMID)
 	if err != nil {
+		log.Printf("console %s: vncproxy error: %v", name, err)
 		http.Error(w, "vncproxy: "+err.Error(), 502)
 		return
 	}
+	log.Printf("console %s: vncproxy ok, port=%d", name, vnc.Port)
 	_ = tmpl.ExecuteTemplate(w, "console.html", map[string]any{
 		"Name":   name,
 		"Ticket": vnc.Ticket,
@@ -597,8 +641,10 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 	if u.Port() == "" {
 		targetAddr = u.Hostname() + ":8006"
 	}
+	log.Printf("ws %s: connecting to %s", name, targetAddr)
 	upstream, err := tls.Dial("tcp", targetAddr, &tls.Config{InsecureSkipVerify: true})
 	if err != nil {
+		log.Printf("ws %s: upstream connect error: %v", name, err)
 		http.Error(w, "upstream connect: "+err.Error(), 502)
 		return
 	}
@@ -606,6 +652,7 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 	// Upgrade our connection to Proxmox via the vncwebsocket path.
 	vncPath := fmt.Sprintf("/api2/json/nodes/%s/qemu/%d/vncwebsocket?port=%s&vncticket=%s",
 		entry.Node, entry.VMID, vncPort, url.QueryEscape(ticket))
+	log.Printf("ws %s: upgrading to %s", name, vncPath)
 	nonce := make([]byte, 16)
 	rand.Read(nonce)
 	wsKey := base64.StdEncoding.EncodeToString(nonce)
@@ -617,9 +664,11 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 	upstreamBuf := bufio.NewReader(upstream)
 	if err := consumeHTTPHeaders(upstreamBuf); err != nil {
 		upstream.Close()
+		log.Printf("ws %s: upstream handshake error: %v", name, err)
 		http.Error(w, "upstream 101: "+err.Error(), 502)
 		return
 	}
+	log.Printf("ws %s: upstream handshake ok, starting relay", name)
 
 	// Complete WebSocket handshake with the browser.
 	clientKey := r.Header.Get("Sec-WebSocket-Key")
@@ -645,18 +694,33 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 	defer clientConn.Close()
 	defer upstream.Close()
 
+	// Flush the buffered 101 response to the client before relaying.
+	if err := clientBuf.Flush(); err != nil {
+		log.Printf("ws %s: flush 101 error: %v", name, err)
+		return
+	}
+
 	// Bidirectional relay.
 	done := make(chan struct{}, 2)
 	go func() { io.Copy(upstream, clientBuf); done <- struct{}{} }()
 	go func() { io.Copy(clientConn, upstreamBuf); done <- struct{}{} }()
 	<-done
+	log.Printf("ws %s: relay done", name)
 }
 
 func consumeHTTPHeaders(r *bufio.Reader) error {
+	first := true
 	for {
 		line, err := r.ReadString('\n')
 		if err != nil {
 			return err
+		}
+		if first {
+			// Expect "HTTP/1.1 101 ..."
+			if !strings.HasPrefix(line, "HTTP/") || !strings.Contains(line, " 101 ") {
+				return fmt.Errorf("expected 101, got: %s", strings.TrimSpace(line))
+			}
+			first = false
 		}
 		if line == "\r\n" {
 			return nil
