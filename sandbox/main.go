@@ -119,6 +119,14 @@ var (
 	ephemeralMu  sync.Mutex
 	jobsMu       sync.Mutex
 	jobMap       = map[string]*Job{}
+
+	// stoppedSince tracks when each ephemeral VM was first seen as stopped.
+	// A VM must stay stopped for ephemeralGrace before it is auto-destroyed,
+	// to allow Windows VMs to reboot during first-boot setup without being
+	// prematurely destroyed.
+	stoppedSinceMu sync.Mutex
+	stoppedSince   = map[string]time.Time{}
+	ephemeralGrace = 2 * time.Minute
 )
 
 func newJob(kind string, names []string) *Job {
@@ -795,9 +803,27 @@ func destroyStopped() {
 		}
 		st, err := pveClient.VMStatus(inst.Node, inst.VMID)
 		if err != nil || st != "stopped" {
+			// VM is running (or unreachable) — clear any stopped-since entry.
+			stoppedSinceMu.Lock()
+			delete(stoppedSince, inst.Name)
+			stoppedSinceMu.Unlock()
 			continue
 		}
-		// VM is stopped — destroy it.
+		// VM is stopped. Record when it was first seen stopped, then wait for
+		// the grace period before destroying (allows Windows to reboot).
+		stoppedSinceMu.Lock()
+		if _, seen := stoppedSince[inst.Name]; !seen {
+			stoppedSince[inst.Name] = time.Now()
+			stoppedSinceMu.Unlock()
+			log.Printf("ephemeral watcher: %s stopped, waiting %v grace period before destroy", inst.Name, ephemeralGrace)
+			continue
+		}
+		since := stoppedSince[inst.Name]
+		stoppedSinceMu.Unlock()
+		if time.Since(since) < ephemeralGrace {
+			continue
+		}
+		// VM has been stopped for the full grace period — destroy it.
 		log.Printf("ephemeral watcher: destroying stopped VM %s (VMID %d)", inst.Name, inst.VMID)
 		if !applyLock.TryLock() {
 			log.Printf("ephemeral watcher: apply lock held, skipping %s until next tick", inst.Name)
@@ -833,6 +859,9 @@ func destroyStopped() {
 			delete(eph, name)
 			saveEphemeral(eph)
 			ephemeralMu.Unlock()
+			stoppedSinceMu.Lock()
+			delete(stoppedSince, name)
+			stoppedSinceMu.Unlock()
 			log.Printf("ephemeral watcher: destroyed %s", name)
 		}(inst.Name)
 	}
