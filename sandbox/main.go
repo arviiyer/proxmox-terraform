@@ -149,17 +149,18 @@ func (j *Job) isDone() bool {
 }
 
 var (
-	cfg         Config
-	tmpl        *template.Template
-	applyLock   sync.Mutex
-	pveEndpoint string
-	pveAPIToken string
-	sshNodeKey  string
-	pveClient   *pve.Client
-	ephemeralMu sync.Mutex
-	metadataMu  sync.Mutex
-	jobsMu      sync.Mutex
-	jobMap      = map[string]*Job{}
+	cfg            Config
+	tmpl           *template.Template
+	applyLock      sync.Mutex
+	pveEndpoint    string
+	pveAPIToken    string
+	sshNodeKey     string
+	sshNodeKeyPath string
+	pveClient      *pve.Client
+	ephemeralMu    sync.Mutex
+	metadataMu     sync.Mutex
+	jobsMu         sync.Mutex
+	jobMap         = map[string]*Job{}
 
 	// stoppedSince tracks when each ephemeral VM was first seen as stopped.
 	// A VM must stay stopped for ephemeralGrace before it is auto-destroyed,
@@ -171,11 +172,11 @@ var (
 )
 
 const (
-	postLaunchVMRunningTimeout   = 2 * time.Minute
-	postLaunchGuestReadyTimeout  = 8 * time.Minute
-	postLaunchDNSConfigTimeout   = 2 * time.Minute
-	postLaunchCommandTimeout     = 20 * time.Second
-	postLaunchPollInterval       = 5 * time.Second
+	postLaunchVMRunningTimeout  = 2 * time.Minute
+	postLaunchGuestReadyTimeout = 8 * time.Minute
+	postLaunchDNSConfigTimeout  = 2 * time.Minute
+	postLaunchCommandTimeout    = 20 * time.Second
+	postLaunchPollInterval      = 5 * time.Second
 )
 
 func newJob(kind string, names []string) *Job {
@@ -221,6 +222,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("read SSH node key %q: %v", keyFile, err)
 	}
+	sshNodeKeyPath = keyFile
 	sshNodeKey = string(keyBytes)
 
 	pveClient = pve.New(pveEndpoint, pveAPIToken)
@@ -1259,14 +1261,14 @@ func runNodeCommandOutput(ctx context.Context, args ...string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if sshNodeKey == "" {
+	if sshNodeKeyPath == "" {
 		return "", fmt.Errorf("SSH_NODE_KEY_FILE not configured")
 	}
 
 	remote := shellQuote(args...)
 	cmdArgs := []string{
 		"-F", "/dev/null",
-		"-i", sshNodeKey,
+		"-i", sshNodeKeyPath,
 		"-o", "BatchMode=yes",
 		"-o", "IdentitiesOnly=yes",
 		"-o", "StrictHostKeyChecking=no",
