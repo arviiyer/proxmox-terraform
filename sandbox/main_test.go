@@ -123,3 +123,60 @@ func TestShellQuote(t *testing.T) {
 		t.Fatalf("shellQuote() = %q, want %q", got, want)
 	}
 }
+
+func TestVMStatusRunning(t *testing.T) {
+	if !vmStatusRunning("status: running\n") {
+		t.Fatal("vmStatusRunning returned false for running status")
+	}
+	if vmStatusRunning("status: stopped\n") {
+		t.Fatal("vmStatusRunning returned true for stopped status")
+	}
+}
+
+func TestGuestInterfacesReady(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  string
+		want   bool
+		hasErr bool
+	}{
+		{
+			name: "ready with ipv4",
+			input: `[{"name":"Ethernet","ip-addresses":[{"ip-address":"10.0.2.101","ip-address-type":"ipv4"}]}]`,
+			want: true,
+		},
+		{
+			name: "loopback only",
+			input: `[{"name":"lo","ip-addresses":[{"ip-address":"127.0.0.1","ip-address-type":"ipv4"}]}]`,
+			want: false,
+		},
+		{
+			name: "non-loopback without ipv4",
+			input: `[{"name":"eth0","ip-addresses":[{"ip-address":"fe80::1","ip-address-type":"ipv6"}]}]`,
+			want: false,
+		},
+		{
+			name:   "invalid json",
+			input:  `{`,
+			hasErr: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := guestInterfacesReady(tc.input)
+			if tc.hasErr {
+				if err == nil {
+					t.Fatal("guestInterfacesReady succeeded, want error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("guestInterfacesReady returned error: %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("guestInterfacesReady() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
