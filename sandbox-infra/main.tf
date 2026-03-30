@@ -19,7 +19,6 @@ locals {
     # RE workstation (win11-flare), heavy tooling
     "sandbox-large" = { cores = 6, memory = 16384 }
   }
-  f = lookup(local.flavors, var.instance_type, local.flavors["sandbox-medium"])
 }
 
 resource "proxmox_virtual_environment_vm" "vm" {
@@ -32,13 +31,13 @@ resource "proxmox_virtual_environment_vm" "vm" {
   stop_on_destroy = true
 
   clone {
-    vm_id     = var.template_vmid
+    vm_id     = each.value.template_vmid
     node_name = "summerset"
     full      = true
   }
 
   cpu {
-    cores = local.f.cores
+    cores = lookup(local.flavors, each.value.instance_type, local.flavors["sandbox-medium"]).cores
     # Preserve the template CPU model. The provider defaults to qemu64 when
     # type is omitted, which changed cloned sandbox VMs away from the
     # templates' x86-64-v2-AES model and caused Windows guests to misbehave.
@@ -46,11 +45,11 @@ resource "proxmox_virtual_environment_vm" "vm" {
   }
 
   memory {
-    dedicated = local.f.memory
+    dedicated = lookup(local.flavors, each.value.instance_type, local.flavors["sandbox-medium"]).memory
   }
 
   network_device {
-    bridge = var.bridge
+    bridge = each.value.bridge
     model  = "virtio"
   }
 

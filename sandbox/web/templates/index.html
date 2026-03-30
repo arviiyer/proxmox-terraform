@@ -321,6 +321,62 @@
                 display: none; margin-top: 6px;
             }
             #ephemeral-cb:checked ~ .ephemeral-warning { display: block; }
+            .mode-grid {
+                display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px;
+            }
+            .mode-option {
+                position: relative;
+            }
+            .mode-option input[type="radio"] {
+                position: absolute; opacity: 0; pointer-events: none;
+            }
+            .mode-card {
+                display: block;
+                padding: 14px;
+                border: 1px solid var(--border);
+                border-radius: 10px;
+                background: #fbfbfc;
+                cursor: pointer;
+                min-height: 124px;
+            }
+            .mode-option input[type="radio"]:checked + .mode-card {
+                border-color: #b9cdfa;
+                background: linear-gradient(180deg, #eff6ff 0%, #f8fbff 100%);
+                box-shadow: inset 0 0 0 1px #dbeafe;
+            }
+            .mode-title {
+                display: block;
+                font-size: 14px;
+                font-weight: 700;
+                color: var(--text);
+                margin-bottom: 6px;
+            }
+            .mode-bridge {
+                display: inline-flex;
+                padding: 2px 7px;
+                border-radius: 999px;
+                background: #eef2ff;
+                color: #4338ca;
+                font-size: 11px;
+                font-weight: 700;
+                margin-bottom: 8px;
+            }
+            .mode-copy {
+                display: block;
+                font-size: 12px;
+                color: var(--text-muted);
+                line-height: 1.45;
+            }
+            .network-warning {
+                font-size: 12px;
+                color: var(--red);
+                background: var(--red-bg);
+                padding: 8px 10px;
+                border-radius: 6px;
+                border: 1px solid #fecaca;
+                margin-top: 10px;
+                display: none;
+            }
 
             /* Modals */
             dialog {
@@ -353,6 +409,7 @@
                 .app-shell { grid-template-columns: 1fr; }
                 .sidebar { position: static; }
                 .quick-grid, .workspace-grid { grid-template-columns: 1fr; }
+                .mode-grid { grid-template-columns: 1fr; }
             }
         </style>
     </head>
@@ -397,7 +454,7 @@
                     <section class="hero">
                         <span class="hero-kicker">Ephemeral Detonation</span>
                         <h1>Sandbox</h1>
-                        <p>Launch short-lived Windows or Linux sandbox VMs, validate behavior in-console, and let ephemeral instances auto-destroy once the analysis run is over.</p>
+                        <p>Launch short-lived Windows or Linux sandbox VMs in Offline, FakeNet, or public-only Internet mode, validate behavior in-console, and let ephemeral instances auto-destroy once the analysis run is over.</p>
                     </section>
 
                     <div class="quick-grid">
@@ -432,6 +489,7 @@
                                 <tr>
                                     <th>Name</th>
                                     <th>OS</th>
+                                    <th>Network</th>
                                     <th>VMID</th>
                                     <th>Node</th>
                                     <th>Type</th>
@@ -445,6 +503,7 @@
                                 <tr class="row-dim">
                                     <td><div class="name-cell"><span class="name-text">{{.Name}}</span></div></td>
                                     <td>{{if .OS}}{{.OS}}{{else}}—{{end}}</td>
+                                    <td>{{if .Network}}{{.Network}}{{else}}—{{end}}</td>
                                     <td class="mono">—</td>
                                     <td class="mono">—</td>
                                     <td>—</td>
@@ -455,6 +514,7 @@
                                 <tr class="row-dim">
                                     <td><div class="name-cell"><span class="name-text">{{.Name}}</span></div></td>
                                     <td>{{if .OS}}{{.OS}}{{else}}—{{end}}</td>
+                                    <td>{{if .Network}}{{.Network}}{{else}}—{{end}}</td>
                                     <td class="mono">{{.VMID}}</td>
                                     <td class="mono">{{.Node}}</td>
                                     <td>—</td>
@@ -465,6 +525,7 @@
                                 <tr>
                                     <td><div class="name-cell"><span class="name-text">{{.Name}}</span></div></td>
                                     <td>{{if .OS}}{{.OS}}{{else}}—{{end}}</td>
+                                    <td>{{if .Network}}{{.Network}}{{else}}—{{end}}</td>
                                     <td class="mono">{{.VMID}}</td>
                                     <td class="mono">{{.Node}}</td>
                                     <td>
@@ -562,6 +623,25 @@
                                         <input name="count" type="number" min="1" max="10" value="1" />
                                     </div>
 
+                                    <div class="form-group full">
+                                        <label>Network Mode</label>
+                                        <div class="mode-grid">
+                                            {{range .networkModes}}
+                                            <div class="mode-option">
+                                                <input type="radio" name="network_mode" id="mode-{{.Name}}" value="{{.Name}}" {{if eq .Name $.defaults.NetworkMode}}checked{{end}} />
+                                                <label class="mode-card" for="mode-{{.Name}}">
+                                                    <span class="mode-title">{{.Label}}</span>
+                                                    <span class="mode-bridge">{{.Bridge}}</span>
+                                                    <span class="mode-copy">{{.Description}}</span>
+                                                </label>
+                                            </div>
+                                            {{end}}
+                                        </div>
+                                        <div class="network-warning" id="network-warning">
+                                            Internet mode is restricted to ephemeral detonation only and must ride the dedicated public-analysis bridge.
+                                        </div>
+                                    </div>
+
                                     <div class="form-group">
                                         <label>&nbsp;</label>
                                         <div>
@@ -585,7 +665,7 @@
                     <section class="hero">
                         <span class="hero-kicker">Persistent Workspaces</span>
                         <h1>Analysis Workspaces</h1>
-                        <p>Launch and manage long-lived reverse engineering desktops built on REMnux and FlareVM. Use these when you need tooling, notes, and repeatable snapshots across multiple sessions.</p>
+                        <p>Launch and manage long-lived reverse engineering desktops built on REMnux and FlareVM. Workspaces stay on the offline sandbox network while detonation modes remain scoped to the sandbox view.</p>
                     </section>
 
                     <div class="workspace-grid">
@@ -613,6 +693,7 @@
                                 <tr>
                                     <th>Name</th>
                                     <th>OS</th>
+                                    <th>Network</th>
                                     <th>VMID</th>
                                     <th>Node</th>
                                     <th>Type</th>
@@ -626,6 +707,7 @@
                                 <tr class="row-dim">
                                     <td><div class="name-cell"><span class="name-text">{{.Name}}</span></div></td>
                                     <td>{{if .OS}}{{.OS}}{{else}}—{{end}}</td>
+                                    <td>{{if .Network}}{{.Network}}{{else}}—{{end}}</td>
                                     <td class="mono">—</td>
                                     <td class="mono">—</td>
                                     <td>—</td>
@@ -636,6 +718,7 @@
                                 <tr class="row-dim">
                                     <td><div class="name-cell"><span class="name-text">{{.Name}}</span></div></td>
                                     <td>{{if .OS}}{{.OS}}{{else}}—{{end}}</td>
+                                    <td>{{if .Network}}{{.Network}}{{else}}—{{end}}</td>
                                     <td class="mono">{{.VMID}}</td>
                                     <td class="mono">{{.Node}}</td>
                                     <td>—</td>
@@ -646,6 +729,7 @@
                                 <tr>
                                     <td><div class="name-cell"><span class="name-text">{{.Name}}</span></div></td>
                                     <td>{{if .OS}}{{.OS}}{{else}}—{{end}}</td>
+                                    <td>{{if .Network}}{{.Network}}{{else}}—{{end}}</td>
                                     <td class="mono">{{.VMID}}</td>
                                     <td class="mono">{{.Node}}</td>
                                     <td>
@@ -707,6 +791,7 @@
                         <form method="POST" action="/launch">
                             <input type="hidden" name="view" value="workspaces" />
                             <input type="hidden" name="count" value="1" />
+                            <input type="hidden" name="network_mode" value="offline" />
                             <div class="form-body">
                                 <div class="form-grid">
                                     <div class="form-group">
@@ -736,7 +821,7 @@
                                     <div class="form-group">
                                         <label>VMID Start</label>
                                         <input name="vmid_start" type="number" min="100" max="999999" value="300" required />
-                                        <div class="hint">Persistent workspaces are intended for long-form analysis and repeated snapshots.</div>
+                                        <div class="hint">Persistent workspaces are intended for long-form analysis and repeated snapshots on the offline bridge.</div>
                                     </div>
                                 </div>
                             </div>
@@ -842,10 +927,27 @@
         <script>
             // Ephemeral warning
             const ephemeralCB = document.getElementById('ephemeral-cb');
+            const networkWarning = document.getElementById('network-warning');
+            const networkModeInputs = Array.from(document.querySelectorAll('input[name="network_mode"]'));
+            function syncNetworkModeUI() {
+                if (!ephemeralCB) return;
+                const selected = networkModeInputs.find(input => input.checked);
+                const internetMode = selected && selected.value === 'internet';
+                if (internetMode) {
+                    ephemeralCB.checked = true;
+                    ephemeralCB.disabled = true;
+                    document.getElementById('ephemeral-warning').style.display = 'block';
+                    if (networkWarning) networkWarning.style.display = 'block';
+                    return;
+                }
+                ephemeralCB.disabled = false;
+                document.getElementById('ephemeral-warning').style.display = ephemeralCB.checked ? 'block' : 'none';
+                if (networkWarning) networkWarning.style.display = 'none';
+            }
             if (ephemeralCB) {
-                ephemeralCB.addEventListener('change', function() {
-                    document.getElementById('ephemeral-warning').style.display = this.checked ? 'block' : 'none';
-                });
+                ephemeralCB.addEventListener('change', syncNetworkModeUI);
+                networkModeInputs.forEach(input => input.addEventListener('change', syncNetworkModeUI));
+                syncNetworkModeUI();
             }
 
             // ── Snapshot modal ──

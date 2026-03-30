@@ -1,7 +1,10 @@
 variable "vms" {
-  description = "Map of VM names to their VMID. Node is always summerset."
+  description = "Map of VM names to their immutable launch settings. Node is always summerset."
   type = map(object({
-    vmid = number
+    vmid          = number
+    template_vmid = number
+    instance_type = string
+    bridge        = string
   }))
   default = {}
 }
@@ -24,19 +27,19 @@ variable "ssh_node_key" {
 }
 
 variable "template_vmid" {
-  description = "Template VMID to clone from."
+  description = "Legacy single-template input. Kept only for compatibility with older var files."
   type        = number
   default     = 8010
 }
 
 variable "bridge" {
-  description = "Network bridge. Use vmbr1 for isolated sandbox, vmbr0 for internet access."
+  description = "Legacy single-bridge input. Kept only for compatibility with older var files."
   type        = string
   default     = "vmbr1"
 }
 
 variable "instance_type" {
-  description = "Sandbox flavor: sandbox-small, sandbox-medium, sandbox-large"
+  description = "Legacy single-size input. Kept only for compatibility with older var files."
   type        = string
   default     = "sandbox-medium"
 }
