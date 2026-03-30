@@ -1271,6 +1271,7 @@ func runNodeCommandOutput(ctx context.Context, args ...string) (string, error) {
 		"-i", sshNodeKeyPath,
 		"-o", "BatchMode=yes",
 		"-o", "IdentitiesOnly=yes",
+		"-o", "LogLevel=ERROR",
 		"-o", "StrictHostKeyChecking=no",
 		"-o", "UserKnownHostsFile=/dev/null",
 		"root@" + host,
