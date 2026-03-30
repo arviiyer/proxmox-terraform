@@ -1169,6 +1169,11 @@ func configureGuestDNSServerWithRetry(ctx context.Context, vmid, templateVMID in
 		err := configureGuestDNSServer(cmdCtx, vmid, templateVMID, dnsServer)
 		cancel()
 		if err == nil {
+			verifyCtx, verifyCancel := context.WithTimeout(ctx, postLaunchCommandTimeout)
+			err = verifyGuestDNSServer(verifyCtx, vmid, templateVMID, dnsServer)
+			verifyCancel()
+		}
+		if err == nil {
 			return nil
 		}
 		lastErr = err
@@ -1191,6 +1196,8 @@ func configureGuestDNSServer(ctx context.Context, vmid, templateVMID int, dnsSer
 	default:
 		py := fmt.Sprintf(`from pathlib import Path
 import re
+import subprocess
+import time
 
 dns = %q
 p = Path("/etc/dhcpcd.conf")
@@ -1201,8 +1208,32 @@ if p.exists():
     text = re.sub(r"\n?# sandbox-dns override start\n.*?# sandbox-dns override end\n?", "\n", text, flags=re.S)
     p.write_text(text.rstrip() + "\n\n" + block)
 
+for cmd in (["systemctl", "restart", "dhcpcd"], ["service", "dhcpcd", "restart"], ["dhcpcd", "-n"], ["dhcpcd", "-n", "ens18"]):
+    try:
+        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+    except FileNotFoundError:
+        pass
+
+time.sleep(2)
 Path("/etc/resolv.conf").write_text(f"nameserver {dns}\n")`, dnsServer)
 		return runNodeCommand(ctx, "qm", "guest", "exec", strconv.Itoa(vmid), "--", "python3", "-c", py)
+	}
+}
+
+func verifyGuestDNSServer(ctx context.Context, vmid, templateVMID int, dnsServer string) error {
+	switch templateGuestFamily(templateVMID) {
+	case "windows":
+		ps := fmt.Sprintf(`$adapter=(Get-NetAdapter | Where-Object Status -eq 'Up' | Select-Object -First 1 -ExpandProperty Name); if (-not $adapter) { throw 'no active adapter found' }; $servers=(Get-DnsClientServerAddress -InterfaceAlias $adapter -AddressFamily IPv4).ServerAddresses; if ($servers -notcontains %q) { throw ('dns server not applied: ' + ($servers -join ',')) }`, dnsServer)
+		return runNodeCommand(ctx, "qm", "guest", "exec", strconv.Itoa(vmid), "--", "powershell.exe", "-NoProfile", "-NonInteractive", "-Command", ps)
+	default:
+		out, err := runNodeCommandOutput(ctx, "qm", "guest", "exec", strconv.Itoa(vmid), "--", "python3", "-c", `from pathlib import Path; print(Path("/etc/resolv.conf").read_text())`)
+		if err != nil {
+			return err
+		}
+		if !strings.Contains(out, "nameserver "+dnsServer) {
+			return fmt.Errorf("resolver still not set to %s", dnsServer)
+		}
+		return nil
 	}
 }
 
