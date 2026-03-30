@@ -20,7 +20,8 @@
     "fakenet": {
       "label": "FakeNet",
       "bridge": "vmbr1",
-      "description": "Use the isolated sandbox bridge with a responder appliance for simulated services."
+      "description": "Use the isolated sandbox bridge with a responder appliance for simulated services.",
+      "dns_server": "10.0.2.53"
     },
     "internet": {
       "label": "Internet (public-only)",
