@@ -55,6 +55,7 @@ type Instance struct {
 	Name      string
 	VMID      int
 	Node      string
+	OS        string
 	Status    string // "running", "stopped", ""
 	Ephemeral bool
 }
@@ -109,16 +110,17 @@ func (j *Job) isDone() bool {
 }
 
 var (
-	cfg          Config
-	tmpl         *template.Template
-	applyLock    sync.Mutex
-	pveEndpoint  string
-	pveAPIToken  string
-	sshNodeKey   string
-	pveClient    *pve.Client
-	ephemeralMu  sync.Mutex
-	jobsMu       sync.Mutex
-	jobMap       = map[string]*Job{}
+	cfg         Config
+	tmpl        *template.Template
+	applyLock   sync.Mutex
+	pveEndpoint string
+	pveAPIToken string
+	sshNodeKey  string
+	pveClient   *pve.Client
+	ephemeralMu sync.Mutex
+	metadataMu  sync.Mutex
+	jobsMu      sync.Mutex
+	jobMap      = map[string]*Job{}
 
 	// stoppedSince tracks when each ephemeral VM was first seen as stopped.
 	// A VM must stay stopped for ephemeralGrace before it is auto-destroyed,
@@ -219,9 +221,11 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 
 	// Fetch power states in parallel.
 	ephemeral := loadEphemeral()
+	metadata := loadMetadata()
 	var wg sync.WaitGroup
 	for i := range instances {
 		instances[i].Ephemeral = ephemeral[instances[i].Name]
+		instances[i].OS = templateOSLabel(metadata[instances[i].Name].TemplateVMID)
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
@@ -380,15 +384,25 @@ func handleLaunch(w http.ResponseWriter, r *http.Request) {
 		logs, applyErr := runner.Apply(ctx, varFile)
 		logs = stripANSI(logs)
 
-		// Register ephemeral VMs before releasing the lock.
-		if applyErr == nil && form.Ephemeral {
-			ephemeralMu.Lock()
-			eph := loadEphemeral()
+		if applyErr == nil {
+			metadataMu.Lock()
+			meta := loadMetadata()
 			for _, n := range names {
-				eph[n] = true
+				meta[n] = VMMetadata{TemplateVMID: form.TemplateVMID}
 			}
-			saveEphemeral(eph)
-			ephemeralMu.Unlock()
+			saveMetadata(meta)
+			metadataMu.Unlock()
+
+			// Register ephemeral VMs before releasing the lock.
+			if form.Ephemeral {
+				ephemeralMu.Lock()
+				eph := loadEphemeral()
+				for _, n := range names {
+					eph[n] = true
+				}
+				saveEphemeral(eph)
+				ephemeralMu.Unlock()
+			}
 		}
 
 		job.complete(logs, applyErr)
@@ -461,6 +475,14 @@ func handleDestroy(w http.ResponseWriter, r *http.Request) {
 		delete(eph, name)
 		saveEphemeral(eph)
 		ephemeralMu.Unlock()
+
+		if destroyErr == nil {
+			metadataMu.Lock()
+			meta := loadMetadata()
+			delete(meta, name)
+			saveMetadata(meta)
+			metadataMu.Unlock()
+		}
 
 		job.complete(logs, destroyErr)
 	}()
@@ -859,6 +881,13 @@ func destroyStopped() {
 			delete(eph, name)
 			saveEphemeral(eph)
 			ephemeralMu.Unlock()
+
+			metadataMu.Lock()
+			meta := loadMetadata()
+			delete(meta, name)
+			saveMetadata(meta)
+			metadataMu.Unlock()
+
 			stoppedSinceMu.Lock()
 			delete(stoppedSince, name)
 			stoppedSinceMu.Unlock()
@@ -892,6 +921,53 @@ func saveEphemeral(eph map[string]bool) {
 	}
 	b, _ := json.MarshalIndent(names, "", "  ")
 	os.WriteFile("ephemeral.json", b, 0o600)
+}
+
+// ── Per-VM metadata ────────────────────────────────────────────────────────
+
+type VMMetadata struct {
+	TemplateVMID int `json:"template_vmid"`
+}
+
+func loadMetadata() map[string]VMMetadata {
+	b, err := os.ReadFile("metadata.json")
+	if err != nil {
+		return map[string]VMMetadata{}
+	}
+	var meta map[string]VMMetadata
+	if err := json.Unmarshal(b, &meta); err != nil {
+		return map[string]VMMetadata{}
+	}
+	if meta == nil {
+		return map[string]VMMetadata{}
+	}
+	return meta
+}
+
+func saveMetadata(meta map[string]VMMetadata) {
+	b, _ := json.MarshalIndent(meta, "", "  ")
+	os.WriteFile("metadata.json", b, 0o600)
+}
+
+func templateOSLabel(vmid int) string {
+	for _, t := range cfg.AllowedTemplates {
+		if t.VMID != vmid {
+			continue
+		}
+		switch t.Name {
+		case "debian13-sandbox":
+			return "Debian 13"
+		case "remnux":
+			return "REMnux"
+		case "win11-sandbox":
+			return "Windows 11"
+		case "win11-flare":
+			return "Windows 11 + FlareVM"
+		default:
+			return t.Name
+		}
+	}
+	return ""
 }
 
 // ── Terraform state helpers ───────────────────────────────────────────────

@@ -21,8 +21,12 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder   /src/sandbox/sandbox  /app/sandbox
+COPY --from=builder   /src/sandbox/entrypoint.sh /app/entrypoint.sh
+COPY sandbox-infra/ /app/sandbox-infra-template/
 COPY --from=terraform /bin/terraform        /usr/local/bin/terraform
+
+RUN chmod +x /app/entrypoint.sh
 
 WORKDIR /app
 EXPOSE 8089
-CMD ["/app/sandbox"]
+ENTRYPOINT ["/app/entrypoint.sh"]
