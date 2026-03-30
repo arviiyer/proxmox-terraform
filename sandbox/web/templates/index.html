@@ -67,6 +67,97 @@
 
             /* Layout */
             .page { max-width: 1200px; margin: 0 auto; padding: 24px 24px 48px; }
+            .app-shell { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 24px; align-items: start; }
+            .sidebar {
+                position: sticky; top: 24px;
+                background: var(--surface);
+                border: 1px solid var(--border);
+                border-radius: var(--radius);
+                box-shadow: var(--shadow);
+                padding: 16px;
+            }
+            .sidebar-label {
+                font-size: 11px; font-weight: 700; letter-spacing: 0.08em;
+                text-transform: uppercase; color: var(--text-muted); margin-bottom: 12px;
+            }
+            .nav-list { display: flex; flex-direction: column; gap: 10px; }
+            .nav-link {
+                display: block; text-decoration: none;
+                padding: 14px 14px 12px; border-radius: 10px;
+                border: 1px solid var(--border); color: var(--text);
+                background: #fbfbfc;
+            }
+            .nav-link:hover { border-color: #cfd5de; background: #f6f7f9; }
+            .nav-link.active {
+                border-color: #b9cdfa;
+                background: linear-gradient(180deg, #eff6ff 0%, #e7f0ff 100%);
+                box-shadow: inset 0 0 0 1px #dbeafe;
+            }
+            .nav-title { display: block; font-size: 15px; font-weight: 700; margin-bottom: 4px; }
+            .nav-copy { display: block; font-size: 12px; color: var(--text-muted); line-height: 1.45; }
+            .content { min-width: 0; }
+            .hero {
+                background:
+                    linear-gradient(135deg, rgba(26,26,46,0.98), rgba(16,63,99,0.96)),
+                    radial-gradient(circle at top right, rgba(228,114,0,0.28), transparent 38%);
+                color: #eff6ff;
+                border-radius: 14px;
+                padding: 24px 24px 22px;
+                margin-bottom: 20px;
+                box-shadow: 0 18px 34px rgba(12, 26, 44, 0.22);
+            }
+            .hero h1 { margin: 0 0 8px; font-size: 28px; letter-spacing: -0.03em; }
+            .hero p { margin: 0; max-width: 760px; color: #cbd5e1; font-size: 15px; }
+            .hero-kicker {
+                display: inline-flex; margin-bottom: 12px;
+                font-size: 11px; font-weight: 700; letter-spacing: 0.08em;
+                text-transform: uppercase; color: #fcd9b0;
+            }
+            .quick-grid {
+                display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px;
+                margin-bottom: 20px;
+            }
+            .quick-card {
+                background: linear-gradient(180deg, #154872, #113c61);
+                border: 1px solid rgba(147,197,253,0.28);
+                border-radius: 14px; padding: 18px;
+                color: #eff6ff; min-height: 168px;
+                box-shadow: 0 12px 22px rgba(8,25,40,0.14);
+            }
+            .quick-card h3 { margin: 0 0 8px; font-size: 22px; }
+            .quick-card p { margin: 0; color: #bfdbfe; font-size: 14px; line-height: 1.55; }
+            .quick-card .tag {
+                display: inline-flex; margin-bottom: 14px;
+                padding: 4px 8px; border-radius: 999px;
+                background: rgba(255,255,255,0.12); color: #dbeafe;
+                font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em;
+            }
+            .workspace-grid {
+                display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px;
+                margin-bottom: 20px;
+            }
+            .workspace-card {
+                border: 1px solid var(--border); border-radius: 12px;
+                background: linear-gradient(180deg, #ffffff, #f8fafc);
+                padding: 18px; box-shadow: var(--shadow);
+            }
+            .workspace-card h3 { margin: 0 0 6px; font-size: 18px; }
+            .workspace-card p { margin: 0; color: var(--text-muted); font-size: 14px; }
+            .workspace-meta {
+                display: inline-flex; margin-top: 14px; gap: 6px; flex-wrap: wrap;
+            }
+            .workspace-pill {
+                display: inline-flex; align-items: center;
+                padding: 3px 8px; border-radius: 999px;
+                background: #eef2ff; color: #4338ca;
+                font-size: 11px; font-weight: 700;
+            }
+            .placeholder-note {
+                padding: 12px 14px;
+                background: #fff7ed; border: 1px solid #fed7aa;
+                color: #9a3412; border-radius: 10px;
+                font-size: 13px; margin-bottom: 20px;
+            }
 
             /* Section heading */
             .section-header {
@@ -257,6 +348,12 @@
             }
             .modal-group { margin-bottom: 14px; display: flex; flex-direction: column; gap: 4px; }
             .modal-group:last-child { margin-bottom: 0; }
+
+            @media (max-width: 980px) {
+                .app-shell { grid-template-columns: 1fr; }
+                .sidebar { position: static; }
+                .quick-grid, .workspace-grid { grid-template-columns: 1fr; }
+            }
         </style>
     </head>
     <body>
@@ -280,111 +377,376 @@
             </div>
             {{end}}
 
-            <!-- Instances table -->
-            <div class="section-header">
-                <h1>Instances</h1>
-                {{if .instances}}<span class="count">({{len .instances}})</span>{{end}}
-            </div>
+            <div class="app-shell">
+                <aside class="sidebar">
+                    <div class="sidebar-label">Analysis Modes</div>
+                    <div class="nav-list">
+                        <a class="nav-link {{if eq .currentView "sandbox"}}active{{end}}" href="/?view=sandbox">
+                            <span class="nav-title">Sandbox</span>
+                            <span class="nav-copy">Ephemeral detonation flow for Windows and Linux sandbox VMs.</span>
+                        </a>
+                        <a class="nav-link {{if eq .currentView "workspaces"}}active{{end}}" href="/?view=workspaces">
+                            <span class="nav-title">Analysis Workspaces</span>
+                            <span class="nav-copy">Persistent REMnux and FlareVM workstations for long-form reversing.</span>
+                        </a>
+                    </div>
+                </aside>
 
-            <div class="card">
-                {{if .instances}}
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Name</th>
-                            <th>OS</th>
-                            <th>VMID</th>
-                            <th>Node</th>
-                            <th>Type</th>
-                            <th>Status</th>
-                            <th></th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {{range .instances}}
-                        {{if eq .Status "launching"}}
-                        <tr class="row-dim">
-                            <td><div class="name-cell"><span class="name-text">{{.Name}}</span></div></td>
-                            <td>—</td>
-                            <td class="mono">—</td>
-                            <td class="mono">—</td>
-                            <td>—</td>
-                            <td><span class="badge badge-launching"><span class="badge-dot"></span>launching</span></td>
-                            <td></td>
-                        </tr>
-                        {{else if eq .Status "terminating"}}
-                        <tr class="row-dim">
-                            <td><div class="name-cell"><span class="name-text">{{.Name}}</span></div></td>
-                            <td>{{if .OS}}{{.OS}}{{else}}—{{end}}</td>
-                            <td class="mono">{{.VMID}}</td>
-                            <td class="mono">{{.Node}}</td>
-                            <td>—</td>
-                            <td><span class="badge badge-terminating"><span class="badge-dot"></span>terminating</span></td>
-                            <td></td>
-                        </tr>
+                <div class="content">
+                    {{if eq .currentView "sandbox"}}
+                    <section class="hero">
+                        <span class="hero-kicker">Ephemeral Detonation</span>
+                        <h1>Sandbox</h1>
+                        <p>Launch short-lived Windows or Linux sandbox VMs, validate behavior in-console, and let ephemeral instances auto-destroy once the analysis run is over.</p>
+                    </section>
+
+                    <div class="quick-grid">
+                        <div class="quick-card">
+                            <span class="tag">Planned Intake</span>
+                            <h3>Submit File</h3>
+                            <p>Stage a specimen into a disposable VM without turning detonation hosts into long-lived analyst workstations.</p>
+                        </div>
+                        <div class="quick-card">
+                            <span class="tag">Planned Intake</span>
+                            <h3>Submit URL</h3>
+                            <p>Drive a detonation session from a suspicious download or phishing link while keeping the guest on the isolated sandbox network.</p>
+                        </div>
+                        <div class="quick-card">
+                            <span class="tag">Current Workflow</span>
+                            <h3>Launch Sandbox</h3>
+                            <p>Provision a clean Windows 11 or Debian detonation VM now, then use console, snapshots, and manual staging during analysis.</p>
+                        </div>
+                    </div>
+
+                    <div class="placeholder-note">Sample upload and automated staging are still pending. This view separates the detonation workflow now so we can add ANY.RUN-style intake without mixing it into persistent workspaces.</div>
+
+                    <div class="section-header">
+                        <h2>Sandbox Instances</h2>
+                        {{if .sandboxInstances}}<span class="count">({{len .sandboxInstances}})</span>{{end}}
+                    </div>
+
+                    <div class="card">
+                        {{if .sandboxInstances}}
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>OS</th>
+                                    <th>VMID</th>
+                                    <th>Node</th>
+                                    <th>Type</th>
+                                    <th>Status</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {{range .sandboxInstances}}
+                                {{if eq .Status "launching"}}
+                                <tr class="row-dim">
+                                    <td><div class="name-cell"><span class="name-text">{{.Name}}</span></div></td>
+                                    <td>{{if .OS}}{{.OS}}{{else}}—{{end}}</td>
+                                    <td class="mono">—</td>
+                                    <td class="mono">—</td>
+                                    <td>—</td>
+                                    <td><span class="badge badge-launching"><span class="badge-dot"></span>launching</span></td>
+                                    <td></td>
+                                </tr>
+                                {{else if eq .Status "terminating"}}
+                                <tr class="row-dim">
+                                    <td><div class="name-cell"><span class="name-text">{{.Name}}</span></div></td>
+                                    <td>{{if .OS}}{{.OS}}{{else}}—{{end}}</td>
+                                    <td class="mono">{{.VMID}}</td>
+                                    <td class="mono">{{.Node}}</td>
+                                    <td>—</td>
+                                    <td><span class="badge badge-terminating"><span class="badge-dot"></span>terminating</span></td>
+                                    <td></td>
+                                </tr>
+                                {{else}}
+                                <tr>
+                                    <td><div class="name-cell"><span class="name-text">{{.Name}}</span></div></td>
+                                    <td>{{if .OS}}{{.OS}}{{else}}—{{end}}</td>
+                                    <td class="mono">{{.VMID}}</td>
+                                    <td class="mono">{{.Node}}</td>
+                                    <td>
+                                        {{if .Ephemeral}}
+                                        <span class="type-badge type-ephemeral" title="Auto-destroyed when stopped">ephemeral</span>
+                                        {{else}}
+                                        <span class="type-badge type-persistent" title="Stays up until manually destroyed">persistent</span>
+                                        {{end}}
+                                    </td>
+                                    <td>
+                                        {{if eq .Status "running"}}
+                                        <span class="badge badge-running"><span class="badge-dot"></span>running</span>
+                                        {{else if eq .Status "stopped"}}
+                                        <span class="badge badge-stopped"><span class="badge-dot"></span>stopped</span>
+                                        {{else}}
+                                        <span class="badge badge-unknown"><span class="badge-dot"></span>{{if .Status}}{{.Status}}{{else}}unknown{{end}}</span>
+                                        {{end}}
+                                    </td>
+                                    <td>
+                                        <div class="actions">
+                                            {{if eq .Status "stopped"}}
+                                            <form method="POST" action="/start">
+                                                <input type="hidden" name="name" value="{{.Name}}" />
+                                                <input type="hidden" name="current_view" value="sandbox" />
+                                                <button class="btn btn-start" type="submit">▶ Start</button>
+                                            </form>
+                                            {{else if eq .Status "running"}}
+                                            <form method="POST" action="/stop">
+                                                <input type="hidden" name="name" value="{{.Name}}" />
+                                                <input type="hidden" name="current_view" value="sandbox" />
+                                                <button class="btn btn-stop" type="submit">⏹ Stop</button>
+                                            </form>
+                                            {{end}}
+                                            <a class="btn btn-console" href="/console/{{.Name}}" target="_blank">Console</a>
+                                            <button class="btn btn-snap" onclick="openSnapshotModal('{{.Name}}')">Snapshot</button>
+                                            <button class="btn btn-snap" onclick="openRevertModal('{{.Name}}')">Revert</button>
+                                            <button class="btn btn-danger" onclick="openDestroyModal('{{.Name}}')">Destroy</button>
+                                        </div>
+                                    </td>
+                                </tr>
+                                {{end}}
+                                {{end}}
+                            </tbody>
+                        </table>
                         {{else}}
-                        <tr>
-                            <td>
-                                <div class="name-cell">
-                                    <span class="name-text">{{.Name}}</span>
+                        <div class="empty">
+                            <div class="empty-icon">🧪</div>
+                            <div>No sandbox instances running. Launch one below.</div>
+                        </div>
+                        {{end}}
+                    </div>
+
+                    <div class="section-header" style="margin-top: 8px;">
+                        <h2>Launch Sandbox VM</h2>
+                    </div>
+
+                    <div class="form-card">
+                        <div class="form-card-header">Configure a disposable detonation VM</div>
+                        <form method="POST" action="/launch">
+                            <input type="hidden" name="view" value="sandbox" />
+                            <div class="form-body">
+                                <div class="form-grid">
+                                    <div class="form-group">
+                                        <label>Template</label>
+                                        <select name="template_vmid" required>
+                                            {{range .sandboxTemplates}}
+                                            <option value="{{.VMID}}">{{.Label}} (VMID {{.VMID}})</option>
+                                            {{end}}
+                                        </select>
+                                    </div>
+
+                                    <div class="form-group">
+                                        <label>Instance Type</label>
+                                        <select name="instance_type" required>
+                                            {{range .instanceTypes}}
+                                            <option value="{{.}}" {{if eq . $.defaults.InstanceType}}selected{{end}}>{{.}}</option>
+                                            {{end}}
+                                        </select>
+                                    </div>
+
+                                    <div class="form-group">
+                                        <label>Name Prefix</label>
+                                        <input name="name_prefix" type="text" placeholder="detonation" required />
+                                        <div class="hint">Creates prefix-01, prefix-02, …</div>
+                                    </div>
+
+                                    <div class="form-group">
+                                        <label>VMID Start</label>
+                                        <input name="vmid_start" type="number" min="100" max="999999" value="200" required />
+                                        <div class="hint">Use a free range outside the template VMIDs.</div>
+                                    </div>
+
+                                    <div class="form-group">
+                                        <label>Count</label>
+                                        <input name="count" type="number" min="1" max="10" value="1" />
+                                    </div>
+
+                                    <div class="form-group">
+                                        <label>&nbsp;</label>
+                                        <div>
+                                            <div class="checkbox-row">
+                                                <input type="checkbox" name="ephemeral" id="ephemeral-cb" checked />
+                                                <label for="ephemeral-cb">Ephemeral — auto-destroy when powered off</label>
+                                            </div>
+                                            <div class="ephemeral-warning" id="ephemeral-warning" style="display:block">
+                                                Detonation VMs should normally stay ephemeral. The watcher destroys them after shutdown and the grace period.
+                                            </div>
+                                        </div>
+                                    </div>
                                 </div>
-                            </td>
-                            <td>{{if .OS}}{{.OS}}{{else}}—{{end}}</td>
-                            <td class="mono">{{.VMID}}</td>
-                            <td class="mono">{{.Node}}</td>
-                            <td>
-                                {{if .Ephemeral}}
-                                <span class="type-badge type-ephemeral" title="Auto-destroyed when stopped">ephemeral</span>
+                            </div>
+                            <div class="form-footer">
+                                <button type="submit" class="btn btn-primary">Launch Sandbox</button>
+                            </div>
+                        </form>
+                    </div>
+                    {{else}}
+                    <section class="hero">
+                        <span class="hero-kicker">Persistent Workspaces</span>
+                        <h1>Analysis Workspaces</h1>
+                        <p>Launch and manage long-lived reverse engineering desktops built on REMnux and FlareVM. Use these when you need tooling, notes, and repeatable snapshots across multiple sessions.</p>
+                    </section>
+
+                    <div class="workspace-grid">
+                        {{range .workspaceTemplates}}
+                        <div class="workspace-card">
+                            <h3>{{.Label}}</h3>
+                            <p>{{.Description}}</p>
+                            <div class="workspace-meta">
+                                <span class="workspace-pill">Persistent</span>
+                                <span class="workspace-pill mono">VMID {{.VMID}}</span>
+                            </div>
+                        </div>
+                        {{end}}
+                    </div>
+
+                    <div class="section-header">
+                        <h2>Workspace Instances</h2>
+                        {{if .workspaceInstances}}<span class="count">({{len .workspaceInstances}})</span>{{end}}
+                    </div>
+
+                    <div class="card">
+                        {{if .workspaceInstances}}
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>OS</th>
+                                    <th>VMID</th>
+                                    <th>Node</th>
+                                    <th>Type</th>
+                                    <th>Status</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {{range .workspaceInstances}}
+                                {{if eq .Status "launching"}}
+                                <tr class="row-dim">
+                                    <td><div class="name-cell"><span class="name-text">{{.Name}}</span></div></td>
+                                    <td>{{if .OS}}{{.OS}}{{else}}—{{end}}</td>
+                                    <td class="mono">—</td>
+                                    <td class="mono">—</td>
+                                    <td>—</td>
+                                    <td><span class="badge badge-launching"><span class="badge-dot"></span>launching</span></td>
+                                    <td></td>
+                                </tr>
+                                {{else if eq .Status "terminating"}}
+                                <tr class="row-dim">
+                                    <td><div class="name-cell"><span class="name-text">{{.Name}}</span></div></td>
+                                    <td>{{if .OS}}{{.OS}}{{else}}—{{end}}</td>
+                                    <td class="mono">{{.VMID}}</td>
+                                    <td class="mono">{{.Node}}</td>
+                                    <td>—</td>
+                                    <td><span class="badge badge-terminating"><span class="badge-dot"></span>terminating</span></td>
+                                    <td></td>
+                                </tr>
                                 {{else}}
-                                <span class="type-badge type-persistent" title="Stays up until manually destroyed">persistent</span>
+                                <tr>
+                                    <td><div class="name-cell"><span class="name-text">{{.Name}}</span></div></td>
+                                    <td>{{if .OS}}{{.OS}}{{else}}—{{end}}</td>
+                                    <td class="mono">{{.VMID}}</td>
+                                    <td class="mono">{{.Node}}</td>
+                                    <td>
+                                        {{if .Ephemeral}}
+                                        <span class="type-badge type-ephemeral" title="Auto-destroyed when stopped">ephemeral</span>
+                                        {{else}}
+                                        <span class="type-badge type-persistent" title="Stays up until manually destroyed">persistent</span>
+                                        {{end}}
+                                    </td>
+                                    <td>
+                                        {{if eq .Status "running"}}
+                                        <span class="badge badge-running"><span class="badge-dot"></span>running</span>
+                                        {{else if eq .Status "stopped"}}
+                                        <span class="badge badge-stopped"><span class="badge-dot"></span>stopped</span>
+                                        {{else}}
+                                        <span class="badge badge-unknown"><span class="badge-dot"></span>{{if .Status}}{{.Status}}{{else}}unknown{{end}}</span>
+                                        {{end}}
+                                    </td>
+                                    <td>
+                                        <div class="actions">
+                                            {{if eq .Status "stopped"}}
+                                            <form method="POST" action="/start">
+                                                <input type="hidden" name="name" value="{{.Name}}" />
+                                                <input type="hidden" name="current_view" value="workspaces" />
+                                                <button class="btn btn-start" type="submit">▶ Start</button>
+                                            </form>
+                                            {{else if eq .Status "running"}}
+                                            <form method="POST" action="/stop">
+                                                <input type="hidden" name="name" value="{{.Name}}" />
+                                                <input type="hidden" name="current_view" value="workspaces" />
+                                                <button class="btn btn-stop" type="submit">⏹ Stop</button>
+                                            </form>
+                                            {{end}}
+                                            <a class="btn btn-console" href="/console/{{.Name}}" target="_blank">Console</a>
+                                            <button class="btn btn-snap" onclick="openSnapshotModal('{{.Name}}')">Snapshot</button>
+                                            <button class="btn btn-snap" onclick="openRevertModal('{{.Name}}')">Revert</button>
+                                            <button class="btn btn-danger" onclick="openDestroyModal('{{.Name}}')">Destroy</button>
+                                        </div>
+                                    </td>
+                                </tr>
                                 {{end}}
-                            </td>
-                            <td>
-                                {{if eq .Status "running"}}
-                                <span class="badge badge-running"><span class="badge-dot"></span>running</span>
-                                {{else if eq .Status "stopped"}}
-                                <span class="badge badge-stopped"><span class="badge-dot"></span>stopped</span>
-                                {{else}}
-                                <span class="badge badge-unknown"><span class="badge-dot"></span>{{if .Status}}{{.Status}}{{else}}unknown{{end}}</span>
                                 {{end}}
-                            </td>
-                            <td>
-                                <div class="actions">
-                                    {{if eq .Status "stopped"}}
-                                    <form method="POST" action="/start">
-                                        <input type="hidden" name="name" value="{{.Name}}" />
-                                        <button class="btn btn-start" type="submit">▶ Start</button>
-                                    </form>
-                                    {{else if eq .Status "running"}}
-                                    <form method="POST" action="/stop">
-                                        <input type="hidden" name="name" value="{{.Name}}" />
-                                        <button class="btn btn-stop" type="submit">⏹ Stop</button>
-                                    </form>
-                                    {{end}}
+                            </tbody>
+                        </table>
+                        {{else}}
+                        <div class="empty">
+                            <div class="empty-icon">🛠️</div>
+                            <div>No persistent workspaces running. Launch one below.</div>
+                        </div>
+                        {{end}}
+                    </div>
 
-                                    <a class="btn btn-console" href="/console/{{.Name}}" target="_blank">Console</a>
+                    <div class="section-header" style="margin-top: 8px;">
+                        <h2>Launch Workspace</h2>
+                    </div>
 
-                                    <button class="btn btn-snap"
-                                        onclick="openSnapshotModal('{{.Name}}')">Snapshot</button>
+                    <div class="form-card">
+                        <div class="form-card-header">Provision a persistent reverse engineering VM</div>
+                        <form method="POST" action="/launch">
+                            <input type="hidden" name="view" value="workspaces" />
+                            <input type="hidden" name="count" value="1" />
+                            <div class="form-body">
+                                <div class="form-grid">
+                                    <div class="form-group">
+                                        <label>Template</label>
+                                        <select name="template_vmid" required>
+                                            {{range .workspaceTemplates}}
+                                            <option value="{{.VMID}}">{{.Label}} (VMID {{.VMID}})</option>
+                                            {{end}}
+                                        </select>
+                                    </div>
 
-                                    <button class="btn btn-snap"
-                                        onclick="openRevertModal('{{.Name}}')">Revert</button>
+                                    <div class="form-group">
+                                        <label>Instance Type</label>
+                                        <select name="instance_type" required>
+                                            {{range .instanceTypes}}
+                                            <option value="{{.}}" {{if eq . $.defaults.InstanceType}}selected{{end}}>{{.}}</option>
+                                            {{end}}
+                                        </select>
+                                    </div>
 
-                                    <button class="btn btn-danger"
-                                        onclick="openDestroyModal('{{.Name}}')">Destroy</button>
+                                    <div class="form-group">
+                                        <label>Name Prefix</label>
+                                        <input name="name_prefix" type="text" placeholder="workspace" required />
+                                        <div class="hint">Creates one persistent VM like workspace-01.</div>
+                                    </div>
+
+                                    <div class="form-group">
+                                        <label>VMID Start</label>
+                                        <input name="vmid_start" type="number" min="100" max="999999" value="300" required />
+                                        <div class="hint">Persistent workspaces are intended for long-form analysis and repeated snapshots.</div>
+                                    </div>
                                 </div>
-                            </td>
-                        </tr>
-                        {{end}}{{/* end if eq .Status "launching" */}}
-                        {{end}}{{/* end range .instances */}}
-                    </tbody>
-                </table>
-                {{else}}
-                <div class="empty">
-                    <div class="empty-icon">🧪</div>
-                    <div>No instances running. Launch one below.</div>
+                            </div>
+                            <div class="form-footer">
+                                <button type="submit" class="btn btn-primary">Launch Workspace</button>
+                            </div>
+                        </form>
+                    </div>
+                    {{end}}
                 </div>
-                {{end}}
             </div>
 
             <!-- Snapshot modal -->
@@ -414,6 +776,7 @@
                 <input type="hidden" name="name"        id="sf-name" />
                 <input type="hidden" name="snap_name"   id="sf-snap-name" />
                 <input type="hidden" name="description" id="sf-description" />
+                <input type="hidden" name="current_view" value="{{.currentView}}" />
             </form>
 
             <!-- Revert modal -->
@@ -440,6 +803,7 @@
             <form id="revert-form" method="POST" action="/revert" style="display:none">
                 <input type="hidden" name="name"      id="rf-name" />
                 <input type="hidden" name="snap_name" id="rf-snap-name" />
+                <input type="hidden" name="current_view" value="{{.currentView}}" />
             </form>
 
             <!-- Destroy modal -->
@@ -464,73 +828,8 @@
             <form id="destroy-form" method="POST" action="/destroy" style="display:none">
                 <input type="hidden" name="name"    id="df-name" />
                 <input type="hidden" name="confirm" id="df-confirm" />
+                <input type="hidden" name="current_view" value="{{.currentView}}" />
             </form>
-
-            <!-- Launch form -->
-            <div class="section-header" style="margin-top: 8px;">
-                <h2>Launch Instance</h2>
-            </div>
-
-            <div class="form-card">
-                <div class="form-card-header">Configure new sandbox VM</div>
-                <form method="POST" action="/launch">
-                    <div class="form-body">
-                        <div class="form-grid">
-                            <div class="form-group">
-                                <label>Template</label>
-                                <select name="template_vmid" required>
-                                    {{range .templates}}
-                                    <option value="{{.VMID}}">{{.Name}} (VMID {{.VMID}})</option>
-                                    {{end}}
-                                </select>
-                            </div>
-
-                            <div class="form-group">
-                                <label>Instance Type</label>
-                                <select name="instance_type" required>
-                                    {{range .instanceTypes}}
-                                    <option value="{{.}}" {{if eq . $.defaults.InstanceType}}selected{{end}}>{{.}}</option>
-                                    {{end}}
-                                </select>
-                            </div>
-
-                            <div class="form-group">
-                                <label>Name Prefix</label>
-                                <input name="name_prefix" type="text" placeholder="malware-analysis" required />
-                                <div class="hint">Creates prefix-01, prefix-02, …</div>
-                            </div>
-
-                            <div class="form-group">
-                                <label>VMID Start</label>
-                                <input name="vmid_start" type="number" min="100" max="999999" value="200" required />
-                                <div class="hint">Choose a free range not used by templates (8010–8040)</div>
-                            </div>
-
-                            <div class="form-group">
-                                <label>Count</label>
-                                <input name="count" type="number" min="1" max="10" value="1" />
-                            </div>
-
-                            <div class="form-group">
-                                <label>&nbsp;</label>
-                                <div>
-                                    <div class="checkbox-row">
-                                        <input type="checkbox" name="ephemeral" id="ephemeral-cb" />
-                                        <label for="ephemeral-cb">Ephemeral — auto-destroy when powered off</label>
-                                    </div>
-                                    <div class="ephemeral-warning" id="ephemeral-warning">
-                                        VM will be <strong>permanently destroyed</strong> once it stops running.
-                                        Use for one-shot malware detonation only.
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="form-footer">
-                        <button type="submit" class="btn btn-primary">Launch Instance</button>
-                    </div>
-                </form>
-            </div>
         </div>
 
         {{if .job}}
@@ -542,9 +841,12 @@
 
         <script>
             // Ephemeral warning
-            document.getElementById('ephemeral-cb').addEventListener('change', function() {
-                document.getElementById('ephemeral-warning').style.display = this.checked ? 'block' : 'none';
-            });
+            const ephemeralCB = document.getElementById('ephemeral-cb');
+            if (ephemeralCB) {
+                ephemeralCB.addEventListener('change', function() {
+                    document.getElementById('ephemeral-warning').style.display = this.checked ? 'block' : 'none';
+                });
+            }
 
             // ── Snapshot modal ──
             let _snapVM = '';

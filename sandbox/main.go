@@ -46,6 +46,13 @@ type Config struct {
 	} `json:"defaults"`
 }
 
+type LaunchTemplate struct {
+	Name        string
+	Label       string
+	Description string
+	VMID        int
+}
+
 // VMEntry is passed to Terraform as the vms variable.
 type VMEntry struct {
 	VMID int `json:"vmid"`
@@ -57,6 +64,7 @@ type Instance struct {
 	VMID      int
 	Node      string
 	OS        string
+	View      string
 	Status    string // "running", "stopped", ""
 	Ephemeral bool
 }
@@ -76,6 +84,8 @@ type Job struct {
 	ID     string
 	Kind   string // "launch" or "destroy"
 	Names  []string
+	View   string
+	OS     string
 	mu     sync.Mutex
 	done   bool
 	logs   string
@@ -212,6 +222,8 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	currentView := viewFromRequest(r.URL.Query().Get("view"))
+
 	var instances []Instance
 	runner := tf.Runner{Dir: cfg.TerraformDir}
 	ctx, cancel := tf.DefaultTimeoutCtx()
@@ -227,6 +239,7 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 	for i := range instances {
 		instances[i].Ephemeral = ephemeral[instances[i].Name]
 		instances[i].OS = templateOSLabel(metadata[instances[i].Name].TemplateVMID)
+		instances[i].View = templateView(metadata[instances[i].Name].TemplateVMID)
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
@@ -257,7 +270,12 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			if !found {
-				instances = append(instances, Instance{Name: n, Status: "launching"})
+				instances = append(instances, Instance{
+					Name:   n,
+					OS:     activeJob.OS,
+					View:   activeJob.View,
+					Status: "launching",
+				})
 			}
 		}
 	}
@@ -275,12 +293,18 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	sandboxInstances, workspaceInstances := splitInstances(instances)
+	sandboxTemplates, workspaceTemplates := splitTemplates()
+
 	_ = tmpl.ExecuteTemplate(w, "index.html", map[string]any{
-		"templates":     cfg.AllowedTemplates,
-		"instanceTypes": cfg.AllowedInstanceTypes,
-		"defaults":      cfg.Defaults,
-		"instances":     instances,
-		"job":           activeJob,
+		"sandboxTemplates":   sandboxTemplates,
+		"workspaceTemplates": workspaceTemplates,
+		"instanceTypes":      cfg.AllowedInstanceTypes,
+		"defaults":           cfg.Defaults,
+		"sandboxInstances":   sandboxInstances,
+		"workspaceInstances": workspaceInstances,
+		"currentView":        currentView,
+		"job":                activeJob,
 	})
 }
 
@@ -327,6 +351,7 @@ func handleLaunch(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "another operation is in progress; try again shortly", 409)
 		return
 	}
+	view := viewFromRequest(r.FormValue("view"))
 
 	runner := tf.Runner{Dir: cfg.TerraformDir}
 	ctx, cancel := tf.DefaultTimeoutCtx()
@@ -378,6 +403,8 @@ func handleLaunch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	job := newJob("launch", names)
+	job.View = view
+	job.OS = templateOSLabel(form.TemplateVMID)
 
 	go func() {
 		defer applyLock.Unlock()
@@ -409,7 +436,7 @@ func handleLaunch(w http.ResponseWriter, r *http.Request) {
 		job.complete(logs, applyErr)
 	}()
 
-	http.Redirect(w, r, "/?job="+job.ID, http.StatusSeeOther)
+	http.Redirect(w, r, viewURL(view, job.ID), http.StatusSeeOther)
 }
 
 // ── Destroy ────────────────────────────────────────────────────────────────
@@ -435,6 +462,7 @@ func handleDestroy(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "another operation is in progress; try again shortly", 409)
 		return
 	}
+	view := viewFromRequest(r.FormValue("current_view"))
 
 	runner := tf.Runner{Dir: cfg.TerraformDir}
 	ctx, cancel := tf.DefaultTimeoutCtx()
@@ -463,6 +491,7 @@ func handleDestroy(w http.ResponseWriter, r *http.Request) {
 
 	target := fmt.Sprintf("proxmox_virtual_environment_vm.vm[%q]", name)
 	job := newJob("destroy", []string{name})
+	job.View = view
 
 	go func() {
 		defer applyLock.Unlock()
@@ -488,7 +517,7 @@ func handleDestroy(w http.ResponseWriter, r *http.Request) {
 		job.complete(logs, destroyErr)
 	}()
 
-	http.Redirect(w, r, "/?job="+job.ID, http.StatusSeeOther)
+	http.Redirect(w, r, viewURL(view, job.ID), http.StatusSeeOther)
 }
 
 // ── Start / Stop ───────────────────────────────────────────────────────────
@@ -500,6 +529,7 @@ func handleStart(w http.ResponseWriter, r *http.Request) {
 	}
 	r.ParseForm()
 	name := strings.TrimSpace(r.FormValue("name"))
+	view := viewFromRequest(r.FormValue("current_view"))
 	if name == "" {
 		http.Error(w, "name required", 400)
 		return
@@ -513,7 +543,7 @@ func handleStart(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "start failed: "+err.Error(), 500)
 		return
 	}
-	http.Redirect(w, r, "/", http.StatusSeeOther)
+	http.Redirect(w, r, viewURL(view, ""), http.StatusSeeOther)
 }
 
 func handleStop(w http.ResponseWriter, r *http.Request) {
@@ -523,6 +553,7 @@ func handleStop(w http.ResponseWriter, r *http.Request) {
 	}
 	r.ParseForm()
 	name := strings.TrimSpace(r.FormValue("name"))
+	view := viewFromRequest(r.FormValue("current_view"))
 	if name == "" {
 		http.Error(w, "name required", 400)
 		return
@@ -536,7 +567,7 @@ func handleStop(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "stop failed: "+err.Error(), 500)
 		return
 	}
-	http.Redirect(w, r, "/", http.StatusSeeOther)
+	http.Redirect(w, r, viewURL(view, ""), http.StatusSeeOther)
 }
 
 // ── Snapshot / Revert ─────────────────────────────────────────────────────
@@ -550,6 +581,7 @@ func handleSnapshot(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimSpace(r.FormValue("name"))
 	snapName := strings.TrimSpace(r.FormValue("snap_name"))
 	desc := strings.TrimSpace(r.FormValue("description"))
+	view := viewFromRequest(r.FormValue("current_view"))
 	if name == "" || snapName == "" {
 		http.Error(w, "name and snap_name required", 400)
 		return
@@ -563,7 +595,7 @@ func handleSnapshot(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "snapshot failed: "+err.Error(), 500)
 		return
 	}
-	http.Redirect(w, r, "/", http.StatusSeeOther)
+	http.Redirect(w, r, viewURL(view, ""), http.StatusSeeOther)
 }
 
 func handleRevert(w http.ResponseWriter, r *http.Request) {
@@ -574,6 +606,7 @@ func handleRevert(w http.ResponseWriter, r *http.Request) {
 	r.ParseForm()
 	name := strings.TrimSpace(r.FormValue("name"))
 	snapName := strings.TrimSpace(r.FormValue("snap_name"))
+	view := viewFromRequest(r.FormValue("current_view"))
 	if name == "" || snapName == "" {
 		http.Error(w, "name and snap_name required", 400)
 		return
@@ -587,7 +620,7 @@ func handleRevert(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "revert failed: "+err.Error(), 500)
 		return
 	}
-	http.Redirect(w, r, "/", http.StatusSeeOther)
+	http.Redirect(w, r, viewURL(view, ""), http.StatusSeeOther)
 }
 
 // handleListSnapshots returns snapshot list as JSON for a VM.
@@ -971,8 +1004,87 @@ func templateOSLabel(vmid int) string {
 	return ""
 }
 
+func templateView(vmid int) string {
+	for _, t := range cfg.AllowedTemplates {
+		if t.VMID != vmid {
+			continue
+		}
+		switch t.Name {
+		case "remnux", "win11-flare":
+			return "workspaces"
+		default:
+			return "sandbox"
+		}
+	}
+	return "sandbox"
+}
+
+func templateDescription(vmid int) string {
+	for _, t := range cfg.AllowedTemplates {
+		if t.VMID != vmid {
+			continue
+		}
+		switch t.Name {
+		case "debian13-sandbox":
+			return "Ephemeral Linux detonation VM"
+		case "win11-sandbox":
+			return "Ephemeral Windows 11 sandbox"
+		case "remnux":
+			return "Persistent Linux reverse engineering workspace"
+		case "win11-flare":
+			return "Persistent Windows 11 FlareVM workspace"
+		default:
+			return t.Name
+		}
+	}
+	return ""
+}
+
+func splitTemplates() (sandboxTemplates, workspaceTemplates []LaunchTemplate) {
+	for _, t := range cfg.AllowedTemplates {
+		item := LaunchTemplate{
+			Name:        t.Name,
+			Label:       templateOSLabel(t.VMID),
+			Description: templateDescription(t.VMID),
+			VMID:        t.VMID,
+		}
+		if templateView(t.VMID) == "workspaces" {
+			workspaceTemplates = append(workspaceTemplates, item)
+		} else {
+			sandboxTemplates = append(sandboxTemplates, item)
+		}
+	}
+	return sandboxTemplates, workspaceTemplates
+}
+
+func splitInstances(instances []Instance) (sandboxInstances, workspaceInstances []Instance) {
+	for _, inst := range instances {
+		if inst.View == "workspaces" {
+			workspaceInstances = append(workspaceInstances, inst)
+		} else {
+			sandboxInstances = append(sandboxInstances, inst)
+		}
+	}
+	return sandboxInstances, workspaceInstances
+}
+
 func metadataPath() string {
 	return filepath.Join(cfg.TerraformDir, "metadata.json")
+}
+
+func viewFromRequest(view string) string {
+	if view == "workspaces" {
+		return "workspaces"
+	}
+	return "sandbox"
+}
+
+func viewURL(view, jobID string) string {
+	view = viewFromRequest(view)
+	if jobID != "" {
+		return "/?view=" + view + "&job=" + jobID
+	}
+	return "/?view=" + view
 }
 
 // ── Terraform state helpers ───────────────────────────────────────────────
