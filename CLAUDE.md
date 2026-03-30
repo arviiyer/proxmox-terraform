@@ -12,7 +12,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## OPNsense API Access
 
-OPNsense (10.0.0.1) API key is at `~/codebase/proxmox-terraform/oblivian.internal_root_apikey.txt` (gitignored — never commit).
+OPNsense (10.0.0.1) API key is at `~/codebase/homelab-projects/proxmox-terraform/oblivian.internal_root_apikey.txt` (gitignored — never commit).
 Usage: `curl -sk -u "$KEY:$SECRET" https://10.0.0.1/api/...`
 Apply rules after changes: `POST /api/firewall/filter/apply`
 Export config: `GET /api/core/backup/download/this`
@@ -21,7 +21,7 @@ After any OPNsense change: export config XML → commit to `homelab-projects/hom
 ## Sandbox — Current Deployment Status
 
 - **Container:** running on srv-apps port 8089, `restart: unless-stopped`, compose at `/srv/sandbox/`
-- **Build workflow:** Docker build context is `/home/arvind/repos/proxmox-terraform` on srv-apps (git clone of Forgejo). Always `git push forgejo master` first, then `git pull` on srv-apps, then `docker compose build --no-cache && docker compose up -d`. Changes to `/home/arvind/codebase/proxmox-terraform` on local machine do NOT auto-sync — must push+pull.
+- **Build workflow:** Docker build context is `/home/arvind/repos/proxmox-terraform` on srv-apps (git clone of Forgejo). Always `git push forgejo master` first, then `git pull` on srv-apps, then `docker compose build --no-cache && docker compose up -d`. Changes to `/home/arvind/codebase/homelab-projects/proxmox-terraform` on local machine do NOT auto-sync — must push+pull.
 - **PVE token:** `root@pam!sandbox` on summerset — ACLs: `/nodes/summerset` PVEVMAdmin, `/storage/local-lvm` PVEDatastoreAdmin, `/vms` PVEVMAdmin (needed for VM.Allocate on dest VMID), `/sdn/zones/localnetwork` PVESDNUser (SDN.Use checked on template NIC bridge even when clone overrides it), all privsep=1
 - **Phases complete:** 0–6 plus UI polish — fully deployed, externally accessible, console working ✅
 - **Access:** `sandbox.arviiyer.dev` via CF Tunnel (privacy-lab, `a531fa13-40c3-45b2-a251-ee4e624d2cfb`) + CF Access (One-time PIN). Allowlist: `@toh.ca` domain + `rbarvind04@gmail.com`. toh.ca OTP emails blocked by their mail gateway — use Gmail OTP from corporate laptop.
@@ -31,6 +31,7 @@ After any OPNsense change: export config XML → commit to `homelab-projects/hom
 ## Sandbox — Known Gotchas (hard-won fixes, do not regress)
 
 - **VNCProxy port type:** Proxmox returns `port` as a JSON **string** when called with `websocket=1`. `VNCProxyResult.Port` is `string`, not `int`. Do not change it back to `int`.
+- **Sandbox clone CPU model:** all sandbox templates use CPU type `x86-64-v2-AES`. In Terraform, `cpu { cores = ... }` without an explicit `type` makes the provider rewrite clones to `qemu64`, which broke Windows sandbox boots. Keep `type = "x86-64-v2-AES"` in `sandbox-infra/main.tf` unless the templates are rebuilt with a different CPU model.
 - **VNC ticket encoding:** Pass ticket to console.html template as `template.JS(json.Marshal(vnc.Ticket))` — NOT `vnc.Ticket` with `| js` in the template. Using `| js` causes double-escaping (html/template applies JS escaping on top of `| js`), turning `=` into the literal string `\u003D`, which Proxmox rejects with 401.
 - **WebSocket proxy path:** handleWS connects to `{pveHost}:8006` (NOT the raw vnc.Port number) and upgrades to `/api2/json/nodes/{node}/qemu/{vmid}/vncwebsocket?port={port}&vncticket={ticket}`. Ticket and port are passed via WS URL query params from console.html to avoid a second VNCProxy call (which generates a different ticket).
 - **Hijack flush:** After `hj.Hijack()`, call `clientBuf.Flush()` before starting the bidirectional relay, or the 101 response never reaches the client.
