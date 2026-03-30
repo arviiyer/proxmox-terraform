@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -930,7 +931,7 @@ type VMMetadata struct {
 }
 
 func loadMetadata() map[string]VMMetadata {
-	b, err := os.ReadFile("metadata.json")
+	b, err := os.ReadFile(metadataPath())
 	if err != nil {
 		return map[string]VMMetadata{}
 	}
@@ -946,7 +947,7 @@ func loadMetadata() map[string]VMMetadata {
 
 func saveMetadata(meta map[string]VMMetadata) {
 	b, _ := json.MarshalIndent(meta, "", "  ")
-	os.WriteFile("metadata.json", b, 0o600)
+	os.WriteFile(metadataPath(), b, 0o600)
 }
 
 func templateOSLabel(vmid int) string {
@@ -968,6 +969,10 @@ func templateOSLabel(vmid int) string {
 		}
 	}
 	return ""
+}
+
+func metadataPath() string {
+	return filepath.Join(cfg.TerraformDir, "metadata.json")
 }
 
 // ── Terraform state helpers ───────────────────────────────────────────────
