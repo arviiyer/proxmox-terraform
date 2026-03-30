@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha1"
@@ -1149,7 +1150,6 @@ func runNodeCommand(ctx context.Context, args ...string) error {
 		return fmt.Errorf("SSH_NODE_KEY_FILE not configured")
 	}
 
-	remote := shellQuote(args...)
 	cmdArgs := []string{
 		"-F", "/dev/null",
 		"-i", sshNodeKey,
@@ -1158,9 +1158,12 @@ func runNodeCommand(ctx context.Context, args ...string) error {
 		"-o", "StrictHostKeyChecking=no",
 		"-o", "UserKnownHostsFile=/dev/null",
 		"root@" + host,
-		remote,
+		"python3",
+		"-c",
+		`import os, sys; data = sys.stdin.buffer.read().split(b"\0"); args = [part.decode() for part in data if part]; os.execvp(args[0], args)`,
 	}
 	cmd := exec.CommandContext(ctx, "ssh", cmdArgs...)
+	cmd.Stdin = bytes.NewReader(marshalExecArgs(args...))
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out)))
@@ -1180,12 +1183,13 @@ func nodeSSHHost() (string, error) {
 	return host, nil
 }
 
-func shellQuote(args ...string) string {
-	quoted := make([]string, 0, len(args))
+func marshalExecArgs(args ...string) []byte {
+	var buf bytes.Buffer
 	for _, arg := range args {
-		quoted = append(quoted, "'"+strings.ReplaceAll(arg, "'", `'\''`)+"'")
+		buf.WriteString(arg)
+		buf.WriteByte(0)
 	}
-	return strings.Join(quoted, " ")
+	return buf.Bytes()
 }
 
 func networkModeOptions(view string) []NetworkModeOption {
