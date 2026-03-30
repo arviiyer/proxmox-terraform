@@ -9,6 +9,7 @@ import (
 	"embed"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
 	"io"
@@ -167,6 +168,14 @@ var (
 	stoppedSinceMu sync.Mutex
 	stoppedSince   = map[string]time.Time{}
 	ephemeralGrace = 2 * time.Minute
+)
+
+const (
+	postLaunchVMRunningTimeout   = 2 * time.Minute
+	postLaunchGuestReadyTimeout  = 8 * time.Minute
+	postLaunchDNSConfigTimeout   = 2 * time.Minute
+	postLaunchCommandTimeout     = 20 * time.Second
+	postLaunchPollInterval       = 5 * time.Second
 )
 
 func newJob(kind string, names []string) *Job {
@@ -1073,10 +1082,13 @@ func applyPostLaunchNetworkMode(ctx context.Context, form LaunchForm, names []st
 		if !ok {
 			continue
 		}
-		if err := waitForGuestAgent(ctx, entry.VMID, 2*time.Minute); err != nil {
-			return fmt.Errorf("%s: wait for guest agent: %w", name, err)
+		if err := waitForVMRunning(ctx, entry.VMID, postLaunchVMRunningTimeout); err != nil {
+			return fmt.Errorf("%s: wait for vm running: %w", name, err)
 		}
-		if err := configureGuestDNSServer(ctx, entry.VMID, form.TemplateVMID, mode.DNSServer); err != nil {
+		if err := waitForGuestNetworkReady(ctx, entry.VMID, postLaunchGuestReadyTimeout); err != nil {
+			return fmt.Errorf("%s: wait for guest agent/network: %w", name, err)
+		}
+		if err := configureGuestDNSServerWithRetry(ctx, entry.VMID, form.TemplateVMID, mode.DNSServer, postLaunchDNSConfigTimeout); err != nil {
 			return fmt.Errorf("%s: configure dns server %s: %w", name, mode.DNSServer, err)
 		}
 	}
@@ -1084,22 +1096,87 @@ func applyPostLaunchNetworkMode(ctx context.Context, form LaunchForm, names []st
 	return nil
 }
 
-func waitForGuestAgent(ctx context.Context, vmid int, timeout time.Duration) error {
+func waitForVMRunning(ctx context.Context, vmid int, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
+	var lastErr error
 	for {
 		if time.Now().After(deadline) {
+			if lastErr != nil {
+				return fmt.Errorf("timed out after %v (last status: %v)", timeout, lastErr)
+			}
 			return fmt.Errorf("timed out after %v", timeout)
 		}
-		cmdCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-		err := runNodeCommand(cmdCtx, "qm", "guest", "cmd", strconv.Itoa(vmid), "network-get-interfaces")
+		cmdCtx, cancel := context.WithTimeout(ctx, postLaunchCommandTimeout)
+		out, err := runNodeCommandOutput(cmdCtx, "qm", "status", strconv.Itoa(vmid))
 		cancel()
-		if err == nil {
+		if err == nil && vmStatusRunning(out) {
 			return nil
+		}
+		if err != nil {
+			lastErr = err
+		} else {
+			lastErr = errors.New(strings.TrimSpace(out))
 		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(5 * time.Second):
+		case <-time.After(postLaunchPollInterval):
+		}
+	}
+}
+
+func waitForGuestNetworkReady(ctx context.Context, vmid int, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	var lastErr error
+	for {
+		if time.Now().After(deadline) {
+			if lastErr != nil {
+				return fmt.Errorf("timed out after %v (last error: %v)", timeout, lastErr)
+			}
+			return fmt.Errorf("timed out after %v", timeout)
+		}
+		cmdCtx, cancel := context.WithTimeout(ctx, postLaunchCommandTimeout)
+		out, err := runNodeCommandOutput(cmdCtx, "qm", "guest", "cmd", strconv.Itoa(vmid), "network-get-interfaces")
+		cancel()
+		if err == nil {
+			ready, parseErr := guestInterfacesReady(out)
+			if parseErr == nil && ready {
+				return nil
+			}
+			if parseErr != nil {
+				lastErr = parseErr
+			} else {
+				lastErr = fmt.Errorf("no non-loopback ipv4 interface reported yet")
+			}
+		} else {
+			lastErr = err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(postLaunchPollInterval):
+		}
+	}
+}
+
+func configureGuestDNSServerWithRetry(ctx context.Context, vmid, templateVMID int, dnsServer string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	var lastErr error
+	for {
+		cmdCtx, cancel := context.WithTimeout(ctx, postLaunchCommandTimeout)
+		err := configureGuestDNSServer(cmdCtx, vmid, templateVMID, dnsServer)
+		cancel()
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+		if time.Now().After(deadline) {
+			return fmt.Errorf("timed out after %v (last error: %v)", timeout, lastErr)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(postLaunchPollInterval):
 		}
 	}
 }
@@ -1127,6 +1204,38 @@ Path("/etc/resolv.conf").write_text(f"nameserver {dns}\n")`, dnsServer)
 	}
 }
 
+func vmStatusRunning(output string) bool {
+	return strings.Contains(output, "status: running")
+}
+
+func guestInterfacesReady(output string) (bool, error) {
+	var interfaces []struct {
+		Name        string `json:"name"`
+		IPAddresses []struct {
+			IPAddress     string `json:"ip-address"`
+			IPAddressType string `json:"ip-address-type"`
+		} `json:"ip-addresses"`
+	}
+	if err := json.Unmarshal([]byte(output), &interfaces); err != nil {
+		return false, fmt.Errorf("parse guest interfaces: %w", err)
+	}
+	for _, iface := range interfaces {
+		if iface.Name == "lo" {
+			continue
+		}
+		for _, addr := range iface.IPAddresses {
+			if addr.IPAddressType != "ipv4" {
+				continue
+			}
+			if addr.IPAddress == "" || strings.HasPrefix(addr.IPAddress, "127.") {
+				continue
+			}
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func templateGuestFamily(vmid int) string {
 	for _, t := range cfg.AllowedTemplates {
 		if t.VMID != vmid {
@@ -1141,12 +1250,17 @@ func templateGuestFamily(vmid int) string {
 }
 
 func runNodeCommand(ctx context.Context, args ...string) error {
+	_, err := runNodeCommandOutput(ctx, args...)
+	return err
+}
+
+func runNodeCommandOutput(ctx context.Context, args ...string) (string, error) {
 	host, err := nodeSSHHost()
 	if err != nil {
-		return err
+		return "", err
 	}
 	if sshNodeKey == "" {
-		return fmt.Errorf("SSH_NODE_KEY_FILE not configured")
+		return "", fmt.Errorf("SSH_NODE_KEY_FILE not configured")
 	}
 
 	remote := shellQuote(args...)
@@ -1163,9 +1277,9 @@ func runNodeCommand(ctx context.Context, args ...string) error {
 	cmd := exec.CommandContext(ctx, "ssh", cmdArgs...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out)))
+		return "", fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out)))
 	}
-	return nil
+	return string(out), nil
 }
 
 func nodeSSHHost() (string, error) {
