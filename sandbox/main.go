@@ -1016,7 +1016,8 @@ func parseInstances(show map[string]any) []Instance {
 }
 
 func outputInstances(show map[string]any) []Instance {
-	outputs, _ := show["outputs"].(map[string]any)
+	valuesRoot, _ := show["values"].(map[string]any)
+	outputs, _ := valuesRoot["outputs"].(map[string]any)
 	instancesOut, _ := outputs["instances"].(map[string]any)
 	values, _ := instancesOut["value"].([]any)
 
