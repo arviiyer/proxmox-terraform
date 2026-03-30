@@ -31,7 +31,8 @@ var templatesFS embed.FS
 
 // Config loaded from config.json.
 type Config struct {
-	TerraformDir     string `json:"terraform_dir"`
+	TerraformDir     string                       `json:"terraform_dir"`
+	NetworkModes     map[string]NetworkModeConfig `json:"network_modes"`
 	AllowedTemplates []struct {
 		Name string `json:"name"`
 		VMID int    `json:"vmid"`
@@ -41,9 +42,18 @@ type Config struct {
 		NodeName     string `json:"node_name"`
 		TemplateNode string `json:"template_node"`
 		Bridge       string `json:"bridge"`
+		NetworkMode  string `json:"network_mode"`
 		Datastore    string `json:"datastore"`
 		InstanceType string `json:"instance_type"`
 	} `json:"defaults"`
+}
+
+type NetworkModeConfig struct {
+	Label            string `json:"label"`
+	Bridge           string `json:"bridge"`
+	Description      string `json:"description"`
+	SandboxOnly      bool   `json:"sandbox_only"`
+	RequireEphemeral bool   `json:"require_ephemeral"`
 }
 
 type LaunchTemplate struct {
@@ -53,9 +63,20 @@ type LaunchTemplate struct {
 	VMID        int
 }
 
+type NetworkModeOption struct {
+	Name             string
+	Label            string
+	Description      string
+	Bridge           string
+	RequireEphemeral bool
+}
+
 // VMEntry is passed to Terraform as the vms variable.
 type VMEntry struct {
-	VMID int `json:"vmid"`
+	VMID         int    `json:"vmid"`
+	TemplateVMID int    `json:"template_vmid"`
+	InstanceType string `json:"instance_type"`
+	Bridge       string `json:"bridge"`
 }
 
 // Instance is what we display on the dashboard.
@@ -67,6 +88,7 @@ type Instance struct {
 	View      string
 	Status    string // "running", "stopped", ""
 	Ephemeral bool
+	Network   string
 }
 
 // LaunchForm holds parsed POST /launch parameters.
@@ -77,19 +99,21 @@ type LaunchForm struct {
 	NamePrefix   string
 	VMIDStart    int
 	Ephemeral    bool
+	NetworkMode  string
 }
 
 // Job tracks an in-progress Terraform apply so the dashboard can show a banner.
 type Job struct {
-	ID     string
-	Kind   string // "launch" or "destroy"
-	Names  []string
-	View   string
-	OS     string
-	mu     sync.Mutex
-	done   bool
-	logs   string
-	errMsg string
+	ID      string
+	Kind    string // "launch" or "destroy"
+	Names   []string
+	View    string
+	OS      string
+	Network string
+	mu      sync.Mutex
+	done    bool
+	logs    string
+	errMsg  string
 }
 
 func (j *Job) complete(logs string, err error) {
@@ -163,6 +187,9 @@ func main() {
 	}
 	if err := json.Unmarshal(b, &cfg); err != nil {
 		log.Fatalf("parse config.json: %v", err)
+	}
+	if _, _, err := networkModeSpec(cfg.Defaults.NetworkMode); err != nil {
+		log.Fatalf("invalid default network mode: %v", err)
 	}
 
 	pveEndpoint = os.Getenv("PVE_ENDPOINT")
@@ -238,8 +265,10 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 	var wg sync.WaitGroup
 	for i := range instances {
 		instances[i].Ephemeral = ephemeral[instances[i].Name]
-		instances[i].OS = templateOSLabel(metadata[instances[i].Name].TemplateVMID)
-		instances[i].View = templateView(metadata[instances[i].Name].TemplateVMID)
+		meta := normalizedMetadata(metadata[instances[i].Name])
+		instances[i].OS = templateOSLabel(meta.TemplateVMID)
+		instances[i].View = templateView(meta.TemplateVMID)
+		instances[i].Network = networkModeLabel(meta.NetworkMode)
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
@@ -271,10 +300,11 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 			}
 			if !found {
 				instances = append(instances, Instance{
-					Name:   n,
-					OS:     activeJob.OS,
-					View:   activeJob.View,
-					Status: "launching",
+					Name:    n,
+					OS:      activeJob.OS,
+					View:    activeJob.View,
+					Network: activeJob.Network,
+					Status:  "launching",
 				})
 			}
 		}
@@ -295,11 +325,13 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 
 	sandboxInstances, workspaceInstances := splitInstances(instances)
 	sandboxTemplates, workspaceTemplates := splitTemplates()
+	networkModes := networkModeOptions("sandbox")
 
 	_ = tmpl.ExecuteTemplate(w, "index.html", map[string]any{
 		"sandboxTemplates":   sandboxTemplates,
 		"workspaceTemplates": workspaceTemplates,
 		"instanceTypes":      cfg.AllowedInstanceTypes,
+		"networkModes":       networkModes,
 		"defaults":           cfg.Defaults,
 		"sandboxInstances":   sandboxInstances,
 		"workspaceInstances": workspaceInstances,
@@ -334,6 +366,14 @@ func handleLaunch(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "instance type not allowed", 400)
 		return
 	}
+	modeSpec, modeLabel, err := validatedNetworkMode(form, viewFromRequest(r.FormValue("view")))
+	if err != nil {
+		http.Error(w, err.Error(), 400)
+		return
+	}
+	if form.NetworkMode == "" {
+		form.NetworkMode = cfg.Defaults.NetworkMode
+	}
 	if form.Count < 1 || form.Count > 10 {
 		http.Error(w, "count must be 1..10", 400)
 		return
@@ -365,14 +405,19 @@ func handleLaunch(w http.ResponseWriter, r *http.Request) {
 
 	existingVMs := map[string]VMEntry{}
 	if show, err := runner.ShowJSON(ctx); err == nil {
-		existingVMs = extractVMs(show)
+		existingVMs = extractVMs(show, loadMetadata())
 	}
 
 	newVMs := map[string]VMEntry{}
 	names := make([]string, form.Count)
 	for i := 0; i < form.Count; i++ {
 		name := fmt.Sprintf("%s-%02d", form.NamePrefix, i+1)
-		newVMs[name] = VMEntry{VMID: form.VMIDStart + i}
+		newVMs[name] = VMEntry{
+			VMID:         form.VMIDStart + i,
+			TemplateVMID: form.TemplateVMID,
+			InstanceType: form.InstanceType,
+			Bridge:       modeSpec.Bridge,
+		}
 		names[i] = name
 	}
 
@@ -385,9 +430,6 @@ func handleLaunch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	varPayload := map[string]any{
-		"template_vmid": form.TemplateVMID,
-		"instance_type": form.InstanceType,
-		"bridge":        cfg.Defaults.Bridge,
 		"vms":           vms,
 		"pve_endpoint":  pveEndpoint,
 		"pve_api_token": pveAPIToken,
@@ -405,6 +447,7 @@ func handleLaunch(w http.ResponseWriter, r *http.Request) {
 	job := newJob("launch", names)
 	job.View = view
 	job.OS = templateOSLabel(form.TemplateVMID)
+	job.Network = modeLabel
 
 	go func() {
 		defer applyLock.Unlock()
@@ -416,7 +459,12 @@ func handleLaunch(w http.ResponseWriter, r *http.Request) {
 			metadataMu.Lock()
 			meta := loadMetadata()
 			for _, n := range names {
-				meta[n] = VMMetadata{TemplateVMID: form.TemplateVMID}
+				meta[n] = VMMetadata{
+					TemplateVMID: form.TemplateVMID,
+					InstanceType: form.InstanceType,
+					Bridge:       modeSpec.Bridge,
+					NetworkMode:  form.NetworkMode,
+				}
 			}
 			saveMetadata(meta)
 			metadataMu.Unlock()
@@ -469,14 +517,11 @@ func handleDestroy(w http.ResponseWriter, r *http.Request) {
 
 	existingVMs := map[string]VMEntry{}
 	if show, err := runner.ShowJSON(ctx); err == nil {
-		existingVMs = extractVMs(show)
+		existingVMs = extractVMs(show, loadMetadata())
 	}
 
 	varPayload := map[string]any{
 		"vms":           existingVMs,
-		"template_vmid": cfg.AllowedTemplates[0].VMID,
-		"instance_type": cfg.Defaults.InstanceType,
-		"bridge":        cfg.Defaults.Bridge,
 		"pve_endpoint":  pveEndpoint,
 		"pve_api_token": pveAPIToken,
 		"ssh_node_key":  sshNodeKey,
@@ -836,6 +881,7 @@ func destroyStopped() {
 	ephemeralMu.Lock()
 	eph := loadEphemeral()
 	ephemeralMu.Unlock()
+	metadata := loadMetadata()
 
 	if len(eph) == 0 {
 		return
@@ -890,12 +936,9 @@ func destroyStopped() {
 			dctx, dcancel := tf.DefaultTimeoutCtx()
 			defer dcancel()
 
-			existingVMs := extractVMs(show)
+			existingVMs := extractVMs(show, metadata)
 			varPayload := map[string]any{
 				"vms":           existingVMs,
-				"template_vmid": cfg.AllowedTemplates[0].VMID,
-				"instance_type": cfg.Defaults.InstanceType,
-				"bridge":        cfg.Defaults.Bridge,
 				"pve_endpoint":  pveEndpoint,
 				"pve_api_token": pveAPIToken,
 				"ssh_node_key":  sshNodeKey,
@@ -960,7 +1003,10 @@ func saveEphemeral(eph map[string]bool) {
 // ── Per-VM metadata ────────────────────────────────────────────────────────
 
 type VMMetadata struct {
-	TemplateVMID int `json:"template_vmid"`
+	TemplateVMID int    `json:"template_vmid"`
+	InstanceType string `json:"instance_type"`
+	Bridge       string `json:"bridge"`
+	NetworkMode  string `json:"network_mode"`
 }
 
 func loadMetadata() map[string]VMMetadata {
@@ -981,6 +1027,97 @@ func loadMetadata() map[string]VMMetadata {
 func saveMetadata(meta map[string]VMMetadata) {
 	b, _ := json.MarshalIndent(meta, "", "  ")
 	os.WriteFile(metadataPath(), b, 0o600)
+}
+
+func networkModeSpec(name string) (*NetworkModeConfig, string, error) {
+	if name == "" {
+		name = cfg.Defaults.NetworkMode
+	}
+	spec, ok := cfg.NetworkModes[name]
+	if !ok {
+		return nil, "", fmt.Errorf("network mode %q not allowed", name)
+	}
+	label := spec.Label
+	if label == "" {
+		label = name
+	}
+	return &spec, label, nil
+}
+
+func networkModeLabel(name string) string {
+	_, label, err := networkModeSpec(name)
+	if err != nil {
+		return name
+	}
+	return label
+}
+
+func networkModeOptions(view string) []NetworkModeOption {
+	order := []string{"offline", "fakenet", "internet"}
+	var options []NetworkModeOption
+	for _, name := range order {
+		spec, label, err := networkModeSpec(name)
+		if err != nil {
+			continue
+		}
+		if view == "workspaces" && name != "offline" {
+			continue
+		}
+		options = append(options, NetworkModeOption{
+			Name:             name,
+			Label:            label,
+			Description:      spec.Description,
+			Bridge:           spec.Bridge,
+			RequireEphemeral: spec.RequireEphemeral,
+		})
+	}
+	return options
+}
+
+func validatedNetworkMode(form LaunchForm, view string) (*NetworkModeConfig, string, error) {
+	modeName := form.NetworkMode
+	if modeName == "" {
+		modeName = cfg.Defaults.NetworkMode
+	}
+	spec, label, err := networkModeSpec(modeName)
+	if err != nil {
+		return nil, "", err
+	}
+	if view == "workspaces" && modeName != "offline" {
+		return nil, "", fmt.Errorf("workspaces must stay on offline mode")
+	}
+	if spec.SandboxOnly && view != "sandbox" {
+		return nil, "", fmt.Errorf("%s mode is only allowed for sandbox runs", label)
+	}
+	if spec.RequireEphemeral && !form.Ephemeral {
+		return nil, "", fmt.Errorf("%s mode requires ephemeral VMs", label)
+	}
+	return spec, label, nil
+}
+
+func normalizedMetadata(meta VMMetadata) VMMetadata {
+	if meta.TemplateVMID == 0 && len(cfg.AllowedTemplates) > 0 {
+		meta.TemplateVMID = cfg.AllowedTemplates[0].VMID
+	}
+	if meta.InstanceType == "" {
+		meta.InstanceType = cfg.Defaults.InstanceType
+	}
+	if meta.NetworkMode == "" {
+		meta.NetworkMode = cfg.Defaults.NetworkMode
+	}
+	mode, _, err := networkModeSpec(meta.NetworkMode)
+	if err != nil {
+		meta.NetworkMode = cfg.Defaults.NetworkMode
+		mode, _, _ = networkModeSpec(meta.NetworkMode)
+	}
+	if meta.Bridge == "" {
+		if mode != nil && mode.Bridge != "" {
+			meta.Bridge = mode.Bridge
+		} else {
+			meta.Bridge = cfg.Defaults.Bridge
+		}
+	}
+	return meta
 }
 
 func templateOSLabel(vmid int) string {
@@ -1089,12 +1226,18 @@ func viewURL(view, jobID string) string {
 
 // ── Terraform state helpers ───────────────────────────────────────────────
 
-func extractVMs(show map[string]any) map[string]VMEntry {
+func extractVMs(show map[string]any, metadata map[string]VMMetadata) map[string]VMEntry {
 	result := map[string]VMEntry{}
 	resources := showResources(show)
 	if len(resources) == 0 {
 		for _, inst := range outputInstances(show) {
-			result[inst.Name] = VMEntry{VMID: inst.VMID}
+			meta := normalizedMetadata(metadata[inst.Name])
+			result[inst.Name] = VMEntry{
+				VMID:         inst.VMID,
+				TemplateVMID: meta.TemplateVMID,
+				InstanceType: meta.InstanceType,
+				Bridge:       meta.Bridge,
+			}
 		}
 		return result
 	}
@@ -1103,7 +1246,13 @@ func extractVMs(show map[string]any) map[string]VMEntry {
 		name, _ := vals["name"].(string)
 		vmidF, _ := vals["vm_id"].(float64)
 		if name != "" {
-			result[name] = VMEntry{VMID: int(vmidF)}
+			meta := normalizedMetadata(metadata[name])
+			result[name] = VMEntry{
+				VMID:         int(vmidF),
+				TemplateVMID: meta.TemplateVMID,
+				InstanceType: meta.InstanceType,
+				Bridge:       meta.Bridge,
+			}
 		}
 	}
 	return result
@@ -1229,6 +1378,7 @@ func parseLaunchForm(r *http.Request) (LaunchForm, error) {
 		NamePrefix:   r.FormValue("name_prefix"),
 		VMIDStart:    vmidStart,
 		Ephemeral:    r.FormValue("ephemeral") == "on",
+		NetworkMode:  strings.TrimSpace(r.FormValue("network_mode")),
 	}, nil
 }
 
