@@ -292,6 +292,7 @@
                     <thead>
                         <tr>
                             <th>Name</th>
+                            <th>OS</th>
                             <th>VMID</th>
                             <th>Node</th>
                             <th>Type</th>
@@ -304,6 +305,7 @@
                         {{if eq .Status "launching"}}
                         <tr class="row-dim">
                             <td><div class="name-cell"><span class="name-text">{{.Name}}</span></div></td>
+                            <td>—</td>
                             <td class="mono">—</td>
                             <td class="mono">—</td>
                             <td>—</td>
@@ -313,6 +315,7 @@
                         {{else if eq .Status "terminating"}}
                         <tr class="row-dim">
                             <td><div class="name-cell"><span class="name-text">{{.Name}}</span></div></td>
+                            <td>{{if .OS}}{{.OS}}{{else}}—{{end}}</td>
                             <td class="mono">{{.VMID}}</td>
                             <td class="mono">{{.Node}}</td>
                             <td>—</td>
@@ -326,6 +329,7 @@
                                     <span class="name-text">{{.Name}}</span>
                                 </div>
                             </td>
+                            <td>{{if .OS}}{{.OS}}{{else}}—{{end}}</td>
                             <td class="mono">{{.VMID}}</td>
                             <td class="mono">{{.Node}}</td>
                             <td>
