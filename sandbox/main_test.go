@@ -116,10 +116,10 @@ func TestTemplateGuestFamily(t *testing.T) {
 	}
 }
 
-func TestMarshalExecArgs(t *testing.T) {
-	got := string(marshalExecArgs("qm", "guest", "exec", "8050", "--", "python3", "-c", "print('ok')"))
-	want := "qm\x00guest\x00exec\x008050\x00--\x00python3\x00-c\x00print('ok')\x00"
+func TestShellQuote(t *testing.T) {
+	got := shellQuote("qm", "guest", "exec", "8050", "--", "python3", "-c", "print('ok')")
+	want := `'qm' 'guest' 'exec' '8050' '--' 'python3' '-c' 'print('\''ok'\'')'`
 	if got != want {
-		t.Fatalf("marshalExecArgs() = %q, want %q", got, want)
+		t.Fatalf("shellQuote() = %q, want %q", got, want)
 	}
 }
