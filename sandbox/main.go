@@ -1110,26 +1110,7 @@ func configureGuestDNSServer(ctx context.Context, vmid, templateVMID int, dnsSer
 		ps := fmt.Sprintf(`$adapter=(Get-NetAdapter | Where-Object Status -eq 'Up' | Select-Object -First 1 -ExpandProperty Name); if (-not $adapter) { throw 'no active adapter found' }; Set-DnsClientServerAddress -InterfaceAlias $adapter -ServerAddresses %s`, dnsServer)
 		return runNodeCommand(ctx, "qm", "guest", "exec", strconv.Itoa(vmid), "--", "powershell.exe", "-NoProfile", "-NonInteractive", "-Command", ps)
 	default:
-		script := fmt.Sprintf(`if [ -f /etc/dhcpcd.conf ]; then python3 - <<'PY'
-from pathlib import Path
-
-path = Path("/etc/dhcpcd.conf")
-text = path.read_text()
-start = "# sandbox-dns override start"
-end = "# sandbox-dns override end"
-block = f"{start}\nnohook resolv.conf\nstatic domain_name_servers=%[1]s\n{end}\n"
-
-if start in text and end in text:
-    prefix, rest = text.split(start, 1)
-    _, suffix = rest.split(end, 1)
-    text = prefix.rstrip() + "\n\n" + block + suffix.lstrip("\n")
-else:
-    text = text.rstrip() + "\n\n" + block
-
-path.write_text(text)
-PY
-fi
-printf 'nameserver %[1]s\n' > /etc/resolv.conf`, dnsServer)
+		script := fmt.Sprintf(`if [ -f /etc/dhcpcd.conf ]; then sed -i '/^# sandbox-dns override start$/,/^# sandbox-dns override end$/d' /etc/dhcpcd.conf; printf '\n# sandbox-dns override start\nnohook resolv.conf\nstatic domain_name_servers=%[1]s\n# sandbox-dns override end\n' >> /etc/dhcpcd.conf; fi; printf 'nameserver %[1]s\n' > /etc/resolv.conf`, dnsServer)
 		return runNodeCommand(ctx, "qm", "guest", "exec", strconv.Itoa(vmid), "--", "/bin/sh", "-lc", script)
 	}
 }
