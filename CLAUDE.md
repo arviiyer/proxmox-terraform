@@ -27,6 +27,7 @@ After any OPNsense change: export config XML → commit to `homelab-projects/hom
 - **Access:** `sandbox.arviiyer.dev` via CF Tunnel (privacy-lab, `a531fa13-40c3-45b2-a251-ee4e624d2cfb`) + CF Access (One-time PIN). Allowlist: `@toh.ca` domain + `rbarvind04@gmail.com`. toh.ca OTP emails blocked by their mail gateway — use Gmail OTP from corporate laptop.
 - **Security mitigations in place:** vmbr1 isolated bridge, iptables DROP on summerset (persisted via `sandbox-iptables.service`), dnsmasq DHCP-only on vmbr1 (`/etc/dnsmasq.d/vmbr1-sandbox.conf`, range 10.0.2.100–200), OPNsense block rules (10.0.2.0/24→LAN; summerset→Authentik; summerset→PBS), dedicated scoped PVE token
 - **Internet-mode live status (2026-03-30):** `vmbr2` now exists on summerset via `nic0.60`, host firewall backstops now block `vmbr2` from `vmbr0`/`vmbr1`, OPNsense now has `SANDBOX_PUBLIC` (`opt5`, `10.60.0.1/24`) with public-only deny-first rules plus explicit firewall-interface deny rules (`712-717`), and the Unifi switch now tags VLAN 60 on the OPNsense uplink (port 16) and summerset port (port 2). A disposable guest on `vmbr2` successfully received `10.60.0.101/24`, failed to ping `10.60.0.1` and `10.0.0.1`, reached public internet (`1.1.1.1`), and could not ping `10.0.0.11`, `10.0.0.83`, or `100.64.0.1`.
+- **FakeNet live status (2026-03-30):** responder VM `8050` (`sandbox-fakenet`) now runs on `vmbr1` at `10.0.2.53`. INetSim serves the fake application protocols on that IP, and a local `fakenet-dns.service` answers wildcard DNS A queries to `10.0.2.53`. Sandbox app `FakeNet` launches now rewrite guest DNS post-boot to `10.0.2.53` through the Proxmox guest agent over SSH to summerset. Validation from a disposable `vmbr1` guest: `example.com` resolved to `10.0.2.53`, `curl http://example.com` returned `HTTP/1.1 200 OK` from `INetSim HTTP Server`, and `ping 1.1.1.1` failed.
 - **Risk acceptance:** residual risks reviewed and accepted with due diligence (2026-03-28)
 
 ## Sandbox — Known Gotchas (hard-won fixes, do not regress)
@@ -41,17 +42,15 @@ After any OPNsense change: export config XML → commit to `homelab-projects/hom
 - **Terraform state + build context:** sandbox-infra state lives at `/srv/sandbox/sandbox-infra/` (volume mount). If state gets out of sync with Proxmox, check tfstate manually. Never run terraform manually from outside the container against the same state file.
 - **Job pattern:** both launch and destroy use async jobs (redirect to `/?job=ID`). handleIndex reads `?job=` param, shows banner + placeholder launching/terminating rows. `/job/{id}` page shows Terraform output with 3s auto-refresh while running.
 
-## Sandbox — Planned Network Modes (next session scope)
+## Sandbox — Network Mode Status
 
-Do not implement this ad hoc. Treat internet-enabled sandboxing as a network-segmentation project first and an app feature second.
+Treat sandbox networking as a segmentation project first and an app feature second. As of 2026-03-30, the first full implementation is live:
 
-Current repo status after the first implementation pass:
-- Sandbox app/UI now models explicit per-VM network modes (`Offline`, `FakeNet`, `Internet`) and records them in `sandbox-infra/metadata.json`.
-- Terraform input is now per-VM (`template_vmid`, `instance_type`, `bridge`) so launching a VM in one mode does not rewrite existing VMs onto the same bridge/size.
-- `Internet` is guarded as sandbox-only and ephemeral-only in the app.
-- Live Proxmox bridge work, OPNsense public-only policy, and host firewall updates are done: `vmbr2` on summerset, `nic0.60`, `SANDBOX_PUBLIC` on OPNsense, and public-only deny rules are live.
-- `Internet` should still be treated as incomplete until the switch path carries VLAN 60 end-to-end and the mode is validated with a live guest.
-- FakeNet service delivery is still outstanding.
+- Sandbox app/UI models explicit per-VM network modes (`Offline`, `FakeNet`, `Internet`) and records them in `sandbox-infra/metadata.json`.
+- Terraform input is per-VM (`template_vmid`, `instance_type`, `bridge`) so launching a VM in one mode does not rewrite existing VMs onto the same bridge/size.
+- `Internet` is sandbox-only and ephemeral-only in the app.
+- Live Proxmox bridge work, OPNsense public-only policy, host firewall backstops, and Unifi VLAN carriage are done for `Internet`.
+- FakeNet service delivery is live through the dedicated responder VM on `vmbr1`, with per-launch DNS override enforced after boot through the guest agent.
 
 - **Target modes:** `Offline`, `FakeNet`, and `Internet (public-only)`.
 - **Offline:** preserve current behavior on `vmbr1`. This remains the default and must stay truly isolated.
@@ -71,14 +70,11 @@ Current repo status after the first implementation pass:
 - The sandbox UI should expose network mode explicitly per run, with `Offline` as the default.
 - Record the selected network mode in app/job metadata so analysis runs are auditable.
 
-### Implementation order (for the next session)
+### Validation baseline
 
-1. Validate the network design against the current Proxmox + OPNsense topology.
-2. Implement Proxmox / OPNsense changes first.
-3. Decide and prepare the FakeNet delivery model (template-based or dedicated analysis workflow).
-4. Add sandbox app/backend/UI support for `Offline`, `FakeNet`, and `Internet`.
-5. Deploy to `srv-apps`.
-6. Run end-to-end tests for all three modes.
+1. `Offline`: stays on `vmbr1` with no public route.
+2. `FakeNet`: stays on `vmbr1`, rewrites guest DNS to `10.0.2.53`, resolves arbitrary names to the responder, and receives simulated services from INetSim without a real internet path.
+3. `Internet`: uses `vmbr2` / VLAN 60, receives `10.60.0.0/24`, reaches public internet, and is denied RFC1918, Tailscale, homelab service IPs, and firewall self IPs.
 
 ### Cross-repo reminder
 

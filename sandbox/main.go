@@ -16,8 +16,10 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -54,6 +56,7 @@ type NetworkModeConfig struct {
 	Description      string `json:"description"`
 	SandboxOnly      bool   `json:"sandbox_only"`
 	RequireEphemeral bool   `json:"require_ephemeral"`
+	DNSServer        string `json:"dns_server"`
 }
 
 type LaunchTemplate struct {
@@ -468,6 +471,10 @@ func handleLaunch(w http.ResponseWriter, r *http.Request) {
 			}
 			saveMetadata(meta)
 			metadataMu.Unlock()
+
+			if err := applyPostLaunchNetworkMode(ctx, form, names, newVMs); err != nil {
+				applyErr = fmt.Errorf("post-launch network config: %w", err)
+			}
 
 			// Register ephemeral VMs before releasing the lock.
 			if form.Ephemeral {
@@ -1050,6 +1057,123 @@ func networkModeLabel(name string) string {
 		return name
 	}
 	return label
+}
+
+func applyPostLaunchNetworkMode(ctx context.Context, form LaunchForm, names []string, created map[string]VMEntry) error {
+	mode, _, err := networkModeSpec(form.NetworkMode)
+	if err != nil {
+		return err
+	}
+	if mode.DNSServer == "" {
+		return nil
+	}
+
+	for _, name := range names {
+		entry, ok := created[name]
+		if !ok {
+			continue
+		}
+		if err := waitForGuestAgent(ctx, entry.VMID, 2*time.Minute); err != nil {
+			return fmt.Errorf("%s: wait for guest agent: %w", name, err)
+		}
+		if err := configureGuestDNSServer(ctx, entry.VMID, form.TemplateVMID, mode.DNSServer); err != nil {
+			return fmt.Errorf("%s: configure dns server %s: %w", name, mode.DNSServer, err)
+		}
+	}
+
+	return nil
+}
+
+func waitForGuestAgent(ctx context.Context, vmid int, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		if time.Now().After(deadline) {
+			return fmt.Errorf("timed out after %v", timeout)
+		}
+		cmdCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		err := runNodeCommand(cmdCtx, "qm", "guest", "cmd", strconv.Itoa(vmid), "network-get-interfaces")
+		cancel()
+		if err == nil {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(5 * time.Second):
+		}
+	}
+}
+
+func configureGuestDNSServer(ctx context.Context, vmid, templateVMID int, dnsServer string) error {
+	switch templateGuestFamily(templateVMID) {
+	case "windows":
+		ps := fmt.Sprintf(`$adapter=(Get-NetAdapter | Where-Object Status -eq 'Up' | Select-Object -First 1 -ExpandProperty Name); if (-not $adapter) { throw 'no active adapter found' }; Set-DnsClientServerAddress -InterfaceAlias $adapter -ServerAddresses %s`, dnsServer)
+		return runNodeCommand(ctx, "qm", "guest", "exec", strconv.Itoa(vmid), "--", "powershell.exe", "-NoProfile", "-NonInteractive", "-Command", ps)
+	default:
+		script := fmt.Sprintf(`printf 'nameserver %s\n' > /etc/resolv.conf`, dnsServer)
+		return runNodeCommand(ctx, "qm", "guest", "exec", strconv.Itoa(vmid), "--", "/bin/sh", "-lc", script)
+	}
+}
+
+func templateGuestFamily(vmid int) string {
+	for _, t := range cfg.AllowedTemplates {
+		if t.VMID != vmid {
+			continue
+		}
+		if strings.HasPrefix(t.Name, "win11-") {
+			return "windows"
+		}
+		return "linux"
+	}
+	return "linux"
+}
+
+func runNodeCommand(ctx context.Context, args ...string) error {
+	host, err := nodeSSHHost()
+	if err != nil {
+		return err
+	}
+	if sshNodeKey == "" {
+		return fmt.Errorf("SSH_NODE_KEY_FILE not configured")
+	}
+
+	remote := shellQuote(args...)
+	cmdArgs := []string{
+		"-F", "/dev/null",
+		"-i", sshNodeKey,
+		"-o", "BatchMode=yes",
+		"-o", "IdentitiesOnly=yes",
+		"-o", "StrictHostKeyChecking=no",
+		"-o", "UserKnownHostsFile=/dev/null",
+		"root@" + host,
+		remote,
+	}
+	cmd := exec.CommandContext(ctx, "ssh", cmdArgs...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+func nodeSSHHost() (string, error) {
+	u, err := url.Parse(pveEndpoint)
+	if err != nil {
+		return "", fmt.Errorf("parse PVE endpoint: %w", err)
+	}
+	host := u.Hostname()
+	if host == "" {
+		return "", fmt.Errorf("missing host in PVE endpoint")
+	}
+	return host, nil
+}
+
+func shellQuote(args ...string) string {
+	quoted := make([]string, 0, len(args))
+	for _, arg := range args {
+		quoted = append(quoted, "'"+strings.ReplaceAll(arg, "'", `'\''`)+"'")
+	}
+	return strings.Join(quoted, " ")
 }
 
 func networkModeOptions(view string) []NetworkModeOption {

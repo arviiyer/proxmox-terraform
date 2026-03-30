@@ -96,3 +96,31 @@ func TestExtractVMsMergesMetadata(t *testing.T) {
 		t.Fatalf("unexpected VM entry: %#v", vm)
 	}
 }
+
+func TestTemplateGuestFamily(t *testing.T) {
+	cfg = Config{
+		AllowedTemplates: []struct {
+			Name string `json:"name"`
+			VMID int    `json:"vmid"`
+		}{
+			{Name: "debian13-sandbox", VMID: 8010},
+			{Name: "win11-sandbox", VMID: 8030},
+		},
+	}
+
+	if got := templateGuestFamily(8010); got != "linux" {
+		t.Fatalf("templateGuestFamily(8010) = %q, want linux", got)
+	}
+	if got := templateGuestFamily(8030); got != "windows" {
+		t.Fatalf("templateGuestFamily(8030) = %q, want windows", got)
+	}
+}
+
+func TestShellQuote(t *testing.T) {
+	got := shellQuote("qm", "guest", "exec", "8050", "--", "/bin/sh", "-lc", "printf 'nameserver 10.0.2.53\n' >/etc/resolv.conf")
+	want := `'qm' 'guest' 'exec' '8050' '--' '/bin/sh' '-lc' 'printf '\''nameserver 10.0.2.53
+'\'' >/etc/resolv.conf'`
+	if got != want {
+		t.Fatalf("shellQuote() = %q, want %q", got, want)
+	}
+}
