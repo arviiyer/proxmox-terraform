@@ -141,19 +141,19 @@ func TestGuestInterfacesReady(t *testing.T) {
 		hasErr bool
 	}{
 		{
-			name: "ready with ipv4",
+			name:  "ready with ipv4",
 			input: `[{"name":"Ethernet","ip-addresses":[{"ip-address":"10.0.2.101","ip-address-type":"ipv4"}]}]`,
-			want: true,
+			want:  true,
 		},
 		{
-			name: "loopback only",
+			name:  "loopback only",
 			input: `[{"name":"lo","ip-addresses":[{"ip-address":"127.0.0.1","ip-address-type":"ipv4"}]}]`,
-			want: false,
+			want:  false,
 		},
 		{
-			name: "non-loopback without ipv4",
+			name:  "non-loopback without ipv4",
 			input: `[{"name":"eth0","ip-addresses":[{"ip-address":"fe80::1","ip-address-type":"ipv6"}]}]`,
-			want: false,
+			want:  false,
 		},
 		{
 			name:   "invalid json",
