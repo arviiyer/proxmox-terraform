@@ -525,8 +525,10 @@ func runLaunchJob(w http.ResponseWriter, r *http.Request, form LaunchForm, kind,
 	go func() {
 		defer applyLock.Unlock()
 		defer cancel()
+		log.Printf("job %s: starting %s for %v", job.ID, kind, names)
 		logs, applyErr := runner.Apply(ctx, varFile)
 		logs = stripANSI(logs)
+		log.Printf("job %s: terraform apply finished (err=%v)", job.ID, applyErr)
 
 		if applyErr == nil {
 			metadataMu.Lock()
@@ -542,17 +544,22 @@ func runLaunchJob(w http.ResponseWriter, r *http.Request, form LaunchForm, kind,
 			saveMetadata(meta)
 			metadataMu.Unlock()
 
+			log.Printf("job %s: metadata saved", job.ID)
 			if err := applyPostLaunchNetworkMode(ctx, form, names, newVMs); err != nil {
 				applyErr = fmt.Errorf("post-launch network config: %w", err)
+				log.Printf("job %s: post-launch network config failed: %v", job.ID, applyErr)
 			}
 			if applyErr == nil && submissionURL != "" {
+				log.Printf("job %s: starting url staging for %s", job.ID, names[0])
 				stagedPath, err := stageURLSubmissionWithRetry(ctx, names[0], form.TemplateVMID, newVMs[names[0]].VMID, submissionURL, postLaunchURLStageTimeout)
 				if err != nil {
 					applyErr = fmt.Errorf("post-launch url staging: %w", err)
+					log.Printf("job %s: url staging failed: %v", job.ID, applyErr)
 				} else {
 					job.mu.Lock()
 					job.StagedPath = stagedPath
 					job.mu.Unlock()
+					log.Printf("job %s: url staging complete at %s", job.ID, stagedPath)
 				}
 			}
 
@@ -565,9 +572,11 @@ func runLaunchJob(w http.ResponseWriter, r *http.Request, form LaunchForm, kind,
 				}
 				saveEphemeral(eph)
 				ephemeralMu.Unlock()
+				log.Printf("job %s: ephemeral state saved", job.ID)
 			}
 		}
 
+		log.Printf("job %s: completing with err=%v", job.ID, applyErr)
 		job.complete(logs, applyErr)
 	}()
 
