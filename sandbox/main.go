@@ -1306,10 +1306,11 @@ func stageURLSubmission(ctx context.Context, name string, templateVMID, vmid int
 				"Set-Content -Path $shortcut -Value $shortcutBody -Encoding ASCII\n\n"+
 				"$taskName='SandboxOpenSubmittedURL'\n"+
 				"$triggerTime=(Get-Date).AddMinutes(1).ToString('HH:mm')\n"+
-				"$taskCommand='cmd.exe /c start \"\" ' + $url\n"+
-				"schtasks.exe /Delete /TN $taskName /F | Out-Null\n"+
+				"$taskCommand='cmd.exe /c start ' + $url\n"+
 				"schtasks.exe /Create /TN $taskName /SC ONCE /ST $triggerTime /TR $taskCommand /IT /RU analyst /F | Out-Null\n"+
-				"schtasks.exe /Run /TN $taskName | Out-Null\n",
+				"schtasks.exe /Query /TN $taskName | Out-Null\n"+
+				"schtasks.exe /Run /TN $taskName | Out-Null\n"+
+				"exit 0\n",
 			submittedURL,
 		)
 		if _, err := runGuestExecCommand(ctx, vmid, "powershell.exe", "-NoProfile", "-NonInteractive", "-Command", ps); err != nil {
