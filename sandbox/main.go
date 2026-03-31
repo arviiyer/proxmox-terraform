@@ -1290,14 +1290,12 @@ func stageURLSubmission(ctx context.Context, name string, templateVMID, vmid int
 				"$shortcut='C:\\Users\\Public\\Desktop\\Open Submitted URL.url'\n"+
 				"$shortcutBody=\"[InternetShortcut]`r`nURL=$url`r`n\"\n"+
 				"Set-Content -Path $shortcut -Value $shortcutBody -Encoding ASCII\n\n"+
-				"$interactiveUser=(Get-CimInstance Win32_ComputerSystem).UserName\n"+
-				"if ($interactiveUser) {\n"+
-				"    $taskName='SandboxOpenSubmittedURL'\n"+
-				"    $triggerTime=(Get-Date).AddMinutes(1).ToString('HH:mm')\n"+
-				"    schtasks.exe /Delete /TN $taskName /F *> $null\n"+
-				"    schtasks.exe /Create /TN $taskName /SC ONCE /ST $triggerTime /TR ('rundll32.exe url.dll,FileProtocolHandler \"' + $url + '\"') /RL HIGHEST /RU $interactiveUser /IT /F *> $null\n"+
-				"    schtasks.exe /Run /TN $taskName *> $null\n"+
-				"}",
+				"$taskName='SandboxOpenSubmittedURL'\n"+
+				"$triggerTime=(Get-Date).AddMinutes(1).ToString('HH:mm')\n"+
+				"$taskCommand='cmd.exe /c start \"\" ' + $url\n"+
+				"schtasks.exe /Delete /TN $taskName /F | Out-Null\n"+
+				"schtasks.exe /Create /TN $taskName /SC ONCE /ST $triggerTime /TR $taskCommand /IT /RU analyst /F | Out-Null\n"+
+				"schtasks.exe /Run /TN $taskName | Out-Null\n",
 			submittedURL,
 		)
 		if _, err := runGuestExecCommand(ctx, vmid, "powershell.exe", "-NoProfile", "-NonInteractive", "-Command", ps); err != nil {
