@@ -106,18 +106,29 @@ type LaunchForm struct {
 	NetworkMode  string
 }
 
+type URLSubmissionForm struct {
+	URL          string
+	TemplateVMID int
+	InstanceType string
+	NamePrefix   string
+	VMIDStart    int
+	NetworkMode  string
+}
+
 // Job tracks an in-progress Terraform apply so the dashboard can show a banner.
 type Job struct {
-	ID      string
-	Kind    string // "launch" or "destroy"
-	Names   []string
-	View    string
-	OS      string
-	Network string
-	mu      sync.Mutex
-	done    bool
-	logs    string
-	errMsg  string
+	ID            string
+	Kind          string // "launch", "destroy", "submit-url"
+	Names         []string
+	View          string
+	OS            string
+	Network       string
+	SubmissionURL string
+	StagedPath    string
+	mu            sync.Mutex
+	done          bool
+	logs          string
+	errMsg        string
 }
 
 func (j *Job) complete(logs string, err error) {
@@ -236,6 +247,7 @@ func main() {
 
 	http.HandleFunc("/", handleIndex)
 	http.HandleFunc("/launch", handleLaunch)
+	http.HandleFunc("/submit-url", handleSubmitURL)
 	http.HandleFunc("/destroy", handleDestroy)
 	http.HandleFunc("/start", handleStart)
 	http.HandleFunc("/stop", handleStop)
@@ -380,11 +392,6 @@ func handleLaunch(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "instance type not allowed", 400)
 		return
 	}
-	modeSpec, modeLabel, err := validatedNetworkMode(form, viewFromRequest(r.FormValue("view")))
-	if err != nil {
-		http.Error(w, err.Error(), 400)
-		return
-	}
 	if form.NetworkMode == "" {
 		form.NetworkMode = cfg.Defaults.NetworkMode
 	}
@@ -400,12 +407,69 @@ func handleLaunch(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "name_prefix required", 400)
 		return
 	}
+	runLaunchJob(w, r, form, "launch", "")
+}
+
+func handleSubmitURL(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", 405)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "bad form", 400)
+		return
+	}
+
+	form, err := parseURLSubmissionForm(r)
+	if err != nil {
+		http.Error(w, err.Error(), 400)
+		return
+	}
+	if !isAllowedTemplate(form.TemplateVMID) {
+		http.Error(w, "template not allowed", 400)
+		return
+	}
+	if !isAllowedInstanceType(form.InstanceType) {
+		http.Error(w, "instance type not allowed", 400)
+		return
+	}
+	if strings.TrimSpace(form.NamePrefix) == "" {
+		http.Error(w, "name_prefix required", 400)
+		return
+	}
+	if form.VMIDStart < 100 || form.VMIDStart > 999999 {
+		http.Error(w, "vmid_start out of range", 400)
+		return
+	}
+
+	launch := LaunchForm{
+		TemplateVMID: form.TemplateVMID,
+		InstanceType: form.InstanceType,
+		Count:        1,
+		NamePrefix:   form.NamePrefix,
+		VMIDStart:    form.VMIDStart,
+		Ephemeral:    true,
+		NetworkMode:  form.NetworkMode,
+	}
+
+	runLaunchJob(w, r, launch, "submit-url", form.URL)
+}
+
+func runLaunchJob(w http.ResponseWriter, r *http.Request, form LaunchForm, kind, submissionURL string) {
+	view := viewFromRequest(r.FormValue("view"))
+	modeSpec, modeLabel, err := validatedNetworkMode(form, view)
+	if err != nil {
+		http.Error(w, err.Error(), 400)
+		return
+	}
+	if form.NetworkMode == "" {
+		form.NetworkMode = cfg.Defaults.NetworkMode
+	}
 
 	if !applyLock.TryLock() {
 		http.Error(w, "another operation is in progress; try again shortly", 409)
 		return
 	}
-	view := viewFromRequest(r.FormValue("view"))
 
 	runner := tf.Runner{Dir: cfg.TerraformDir}
 	ctx, cancel := tf.DefaultTimeoutCtx()
@@ -458,10 +522,11 @@ func handleLaunch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	job := newJob("launch", names)
+	job := newJob(kind, names)
 	job.View = view
 	job.OS = templateOSLabel(form.TemplateVMID)
 	job.Network = modeLabel
+	job.SubmissionURL = submissionURL
 
 	go func() {
 		defer applyLock.Unlock()
@@ -485,6 +550,16 @@ func handleLaunch(w http.ResponseWriter, r *http.Request) {
 
 			if err := applyPostLaunchNetworkMode(ctx, form, names, newVMs); err != nil {
 				applyErr = fmt.Errorf("post-launch network config: %w", err)
+			}
+			if applyErr == nil && submissionURL != "" {
+				stagedPath, err := stageURLSubmission(ctx, names[0], form.TemplateVMID, newVMs[names[0]].VMID, submissionURL)
+				if err != nil {
+					applyErr = fmt.Errorf("post-launch url staging: %w", err)
+				} else {
+					job.mu.Lock()
+					job.StagedPath = stagedPath
+					job.mu.Unlock()
+				}
 			}
 
 			// Register ephemeral VMs before releasing the lock.
@@ -718,13 +793,19 @@ func handleJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	status, logs, errMsg := job.snapshot()
+	job.mu.Lock()
+	submissionURL := job.SubmissionURL
+	stagedPath := job.StagedPath
+	job.mu.Unlock()
 	_ = tmpl.ExecuteTemplate(w, "job.html", map[string]any{
-		"ID":     job.ID,
-		"Kind":   job.Kind,
-		"Names":  job.Names,
-		"Status": status,
-		"Logs":   logs,
-		"Error":  errMsg,
+		"ID":            job.ID,
+		"Kind":          job.Kind,
+		"Names":         job.Names,
+		"Status":        status,
+		"Logs":          logs,
+		"Error":         errMsg,
+		"SubmissionURL": submissionURL,
+		"StagedPath":    stagedPath,
 	})
 }
 
@@ -1188,6 +1269,36 @@ func configureGuestDNSServerWithRetry(ctx context.Context, vmid, templateVMID in
 	}
 }
 
+func stageURLSubmission(ctx context.Context, name string, templateVMID, vmid int, submittedURL string) (string, error) {
+	switch templateGuestFamily(templateVMID) {
+	case "windows":
+		stagedPath := `C:\Sandbox\Incoming\submitted-url.txt`
+		ps := fmt.Sprintf(`$dir='C:\Sandbox\Incoming'; New-Item -ItemType Directory -Force -Path $dir | Out-Null; Set-Content -Path (Join-Path $dir 'submitted-url.txt') -Value %q`, submittedURL)
+		if err := runNodeCommand(ctx, "qm", "guest", "exec", strconv.Itoa(vmid), "--", "powershell.exe", "-NoProfile", "-NonInteractive", "-Command", ps); err != nil {
+			return "", err
+		}
+		return stagedPath, nil
+	default:
+		stagedPath := "/home/arvind/submissions/submitted-url.txt"
+		py := fmt.Sprintf(`from pathlib import Path
+import os
+import shlex
+
+url = %q
+base = Path("/home/arvind/submissions")
+base.mkdir(parents=True, exist_ok=True)
+(base / "submitted-url.txt").write_text(url + "\n")
+launcher = base / "open-url.sh"
+launcher.write_text("#!/bin/sh\nxdg-open " + shlex.quote(url) + "\n")
+os.chmod(launcher, 0o755)
+`, submittedURL)
+		if err := runNodeCommand(ctx, "qm", "guest", "exec", strconv.Itoa(vmid), "--", "python3", "-c", py); err != nil {
+			return "", err
+		}
+		return stagedPath, nil
+	}
+}
+
 func configureGuestDNSServer(ctx context.Context, vmid, templateVMID int, dnsServer string) error {
 	switch templateGuestFamily(templateVMID) {
 	case "windows":
@@ -1623,6 +1734,32 @@ func parseLaunchForm(r *http.Request) (LaunchForm, error) {
 		NamePrefix:   r.FormValue("name_prefix"),
 		VMIDStart:    vmidStart,
 		Ephemeral:    r.FormValue("ephemeral") == "on",
+		NetworkMode:  strings.TrimSpace(r.FormValue("network_mode")),
+	}, nil
+}
+
+func parseURLSubmissionForm(r *http.Request) (URLSubmissionForm, error) {
+	tpl, err := parseInt(r.FormValue("template_vmid"))
+	if err != nil {
+		return URLSubmissionForm{}, fmt.Errorf("invalid template_vmid: %w", err)
+	}
+	vmidStart, err := parseInt(r.FormValue("vmid_start"))
+	if err != nil {
+		return URLSubmissionForm{}, fmt.Errorf("invalid vmid_start: %w", err)
+	}
+	rawURL := strings.TrimSpace(r.FormValue("submission_url"))
+	if rawURL == "" {
+		return URLSubmissionForm{}, fmt.Errorf("submission_url required")
+	}
+	if _, err := url.ParseRequestURI(rawURL); err != nil {
+		return URLSubmissionForm{}, fmt.Errorf("invalid submission_url: %w", err)
+	}
+	return URLSubmissionForm{
+		URL:          rawURL,
+		TemplateVMID: tpl,
+		InstanceType: r.FormValue("instance_type"),
+		NamePrefix:   r.FormValue("name_prefix"),
+		VMIDStart:    vmidStart,
 		NetworkMode:  strings.TrimSpace(r.FormValue("network_mode")),
 	}, nil
 }

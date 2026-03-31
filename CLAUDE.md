@@ -27,7 +27,7 @@ After any OPNsense change: export config XML → commit to `homelab-projects/hom
 - **Access:** `sandbox.arviiyer.dev` via CF Tunnel (privacy-lab, `a531fa13-40c3-45b2-a251-ee4e624d2cfb`) + CF Access (One-time PIN). Allowlist: `@toh.ca` domain + `rbarvind04@gmail.com`. toh.ca OTP emails blocked by their mail gateway — use Gmail OTP from corporate laptop.
 - **Security mitigations in place:** vmbr1 isolated bridge, iptables DROP on summerset (persisted via `sandbox-iptables.service`), dnsmasq DHCP-only on vmbr1 (`/etc/dnsmasq.d/vmbr1-sandbox.conf`, range 10.0.2.100–200), OPNsense block rules (10.0.2.0/24→LAN; summerset→Authentik; summerset→PBS), dedicated scoped PVE token
 - **Internet-mode live status (2026-03-30):** `vmbr2` now exists on summerset via `nic0.60`, host firewall backstops now block `vmbr2` from `vmbr0`/`vmbr1`, OPNsense now has `SANDBOX_PUBLIC` (`opt5`, `10.60.0.1/24`) with public-only deny-first rules plus explicit firewall-interface deny rules (`712-717`), and the Unifi switch now tags VLAN 60 on the OPNsense uplink (port 16) and summerset port (port 2). A disposable guest on `vmbr2` successfully received `10.60.0.101/24`, failed to ping `10.60.0.1` and `10.0.0.1`, reached public internet (`1.1.1.1`), and could not ping `10.0.0.11`, `10.0.0.83`, or `100.64.0.1`.
-- **FakeNet live status (2026-03-30):** responder VM `8050` (`sandbox-fakenet`) now runs on `vmbr1` at `10.0.2.53`. INetSim serves the fake application protocols on that IP, and a local `fakenet-dns.service` answers wildcard DNS A queries to `10.0.2.53`. Manual validation from a disposable `vmbr1` guest succeeded: `example.com` resolved to `10.0.2.53`, `curl http://example.com` returned `HTTP/1.1 200 OK` from `INetSim HTTP Server`, and `ping 1.1.1.1` failed. The remaining blocker is app-backed FakeNet launch automation: the sandbox backend still fails post-clone with `wait for guest agent: timed out after 2m0s`, so automatic DNS rewrite to `10.0.2.53` is not yet reliable from the UI.
+- **FakeNet live status (2026-03-30):** responder VM `8050` (`sandbox-fakenet`) now runs on `vmbr1` at `10.0.2.53`. INetSim serves the fake application protocols on that IP, and a local `fakenet-dns.service` answers wildcard DNS A queries to `10.0.2.53`. App-backed FakeNet launches from `sandbox.arviiyer.dev` are now working end-to-end: a disposable UI-launched guest was validated with `/etc/resolv.conf` set to `nameserver 10.0.2.53`, `example.com` resolving to `10.0.2.53`, `curl http://example.com` returning `HTTP/1.1 200 OK` from `INetSim HTTP Server`, and `ping 1.1.1.1` failing. The previous guest-agent timeout/orchestration bug is fixed.
 - **Risk acceptance:** residual risks reviewed and accepted with due diligence (2026-03-28)
 
 ## Sandbox — Known Gotchas (hard-won fixes, do not regress)
@@ -41,7 +41,8 @@ After any OPNsense change: export config XML → commit to `homelab-projects/hom
 - **PVE token ACLs needed for clone:** `/vms` (VM.Allocate on destination VMID) + `/sdn/zones/localnetwork` (SDN.Use on template's NIC bridge) — both required in addition to `/nodes/summerset` and `/storage/local-lvm`.
 - **Terraform state + build context:** sandbox-infra state lives at `/srv/sandbox/sandbox-infra/` (volume mount). If state gets out of sync with Proxmox, check tfstate manually. Never run terraform manually from outside the container against the same state file.
 - **Job pattern:** both launch and destroy use async jobs (redirect to `/?job=ID`). handleIndex reads `?job=` param, shows banner + placeholder launching/terminating rows. `/job/{id}` page shows Terraform output with 3s auto-refresh while running.
-- **Current FakeNet app bug:** UI-backed `FakeNet` launches still fail after Terraform clone with `post-launch network config: <name>: wait for guest agent: timed out after 2m0s`. Direct `qm guest cmd <vmid> network-get-interfaces` works from summerset after the VM is up, so the remaining bug is in sandbox backend post-launch orchestration, not in the network topology.
+- **Stale Terraform outputs:** targeted destroys can leave `terraform output -json` values behind even after the VM and resource are gone. For sandbox instance listing and merge logic, trust `terraform show -json` resources, not cached outputs.
+- **FakeNet orchestration fix:** post-launch FakeNet now waits for VM running state, waits for guest-agent-reported non-loopback IPv4 networking, uses the SSH key path (not key contents) for backend guest commands, suppresses SSH host-key warning noise so JSON parsing stays clean, and verifies that the guest resolver actually ends up on `10.0.2.53` before marking the job done.
 
 ## Sandbox — Network Mode Status
 
@@ -52,7 +53,8 @@ Treat sandbox networking as a segmentation project first and an app feature seco
 - `Internet` is sandbox-only and ephemeral-only in the app.
 - Live Proxmox bridge work, OPNsense public-only policy, host firewall backstops, and Unifi VLAN carriage are done for `Internet`.
 - FakeNet service delivery is live through the dedicated responder VM on `vmbr1`.
-- Manual FakeNet validation is complete, but app-backed post-launch DNS override is still incomplete because the guest-agent wait step times out from the sandbox backend.
+- App-backed FakeNet launch automation is now complete and validated from the sandbox UI.
+- `Submit File` and `Submit URL` remain unimplemented; the current product is a working sandbox launcher/provisioner, not yet an intake-driven analysis workflow.
 
 - **Target modes:** `Offline`, `FakeNet`, and `Internet (public-only)`.
 - **Offline:** preserve current behavior on `vmbr1`. This remains the default and must stay truly isolated.
@@ -75,8 +77,14 @@ Treat sandbox networking as a segmentation project first and an app feature seco
 ### Validation baseline
 
 1. `Offline`: stays on `vmbr1` with no public route.
-2. `FakeNet`: stays on `vmbr1`, and the intended app behavior is to rewrite guest DNS to `10.0.2.53` so arbitrary names resolve to the responder and simulated services come from INetSim without a real internet path. Manual validation is complete; app-backed launch validation is still blocked by the guest-agent timeout bug above.
+2. `FakeNet`: stays on `vmbr1`, rewrites guest DNS to `10.0.2.53`, resolves arbitrary names to the responder, and serves simulated services from INetSim without a real internet path. This is validated from the live sandbox UI.
 3. `Internet`: uses `vmbr2` / VLAN 60, receives `10.60.0.0/24`, reaches public internet, and is denied RFC1918, Tailscale, homelab service IPs, and firewall self IPs.
+
+### Next planned phase
+
+- `Submit URL`: accept a URL, launch an ephemeral guest in the selected mode, stage the URL inside the guest, and hand the analyst off to console.
+- `Submit File`: accept a sample upload, launch an ephemeral guest in the selected mode, stage the file inside the guest, and hand the analyst off to console.
+- Both intake modes should stay sandbox-only, default to ephemeral detonation, and avoid mixing uploads or staged artifacts into persistent workspaces.
 
 ### Cross-repo reminder
 
