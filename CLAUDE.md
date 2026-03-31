@@ -28,6 +28,7 @@ After any OPNsense change: export config XML → commit to `homelab-projects/hom
 - **Security mitigations in place:** vmbr1 isolated bridge, iptables DROP on summerset (persisted via `sandbox-iptables.service`), dnsmasq DHCP-only on vmbr1 (`/etc/dnsmasq.d/vmbr1-sandbox.conf`, range 10.0.2.100–200), OPNsense block rules (10.0.2.0/24→LAN; summerset→Authentik; summerset→PBS), dedicated scoped PVE token
 - **Internet-mode live status (2026-03-30):** `vmbr2` now exists on summerset via `nic0.60`, host firewall backstops now block `vmbr2` from `vmbr0`/`vmbr1`, OPNsense now has `SANDBOX_PUBLIC` (`opt5`, `10.60.0.1/24`) with public-only deny-first rules plus explicit firewall-interface deny rules (`712-717`), and the Unifi switch now tags VLAN 60 on the OPNsense uplink (port 16) and summerset port (port 2). A disposable guest on `vmbr2` successfully received `10.60.0.101/24`, failed to ping `10.60.0.1` and `10.0.0.1`, reached public internet (`1.1.1.1`), and could not ping `10.0.0.11`, `10.0.0.83`, or `100.64.0.1`.
 - **FakeNet live status (2026-03-30):** responder VM `8050` (`sandbox-fakenet`) now runs on `vmbr1` at `10.0.2.53`. INetSim serves the fake application protocols on that IP, and a local `fakenet-dns.service` answers wildcard DNS A queries to `10.0.2.53`. App-backed FakeNet launches from `sandbox.arviiyer.dev` are now working end-to-end: a disposable UI-launched guest was validated with `/etc/resolv.conf` set to `nameserver 10.0.2.53`, `example.com` resolving to `10.0.2.53`, `curl http://example.com` returning `HTTP/1.1 200 OK` from `INetSim HTTP Server`, and `ping 1.1.1.1` failing. The previous guest-agent timeout/orchestration bug is fixed.
+- **Submit URL status (2026-03-31):** Linux `Submit URL` is working. Windows `Submit URL` now stages the submitted URL file, creates the public desktop `.url` launcher, and launches Edge in the guest, but the app can still leave the job page stuck at `Submitting URL…` even after guest-side success. Logs show the remaining issue is backend job-completion/orchestration, not Windows guest staging itself.
 - **Risk acceptance:** residual risks reviewed and accepted with due diligence (2026-03-28)
 
 ## Sandbox — Known Gotchas (hard-won fixes, do not regress)
@@ -44,6 +45,9 @@ After any OPNsense change: export config XML → commit to `homelab-projects/hom
 - **Stale Terraform outputs:** targeted destroys can leave `terraform output -json` values behind even after the VM and resource are gone. For sandbox instance listing and merge logic, trust `terraform show -json` resources, not cached outputs.
 - **FakeNet orchestration fix:** post-launch FakeNet now waits for VM running state, waits for guest-agent-reported non-loopback IPv4 networking, uses the SSH key path (not key contents) for backend guest commands, suppresses SSH host-key warning noise so JSON parsing stays clean, and verifies that the guest resolver actually ends up on `10.0.2.53` before marking the job done.
 - **FakeNet responder recovery:** VM `8050` is not managed by sandbox Terraform state. If it disappears from Proxmox, rebuild it from template `8010` with [`infra/rebuild-sandbox-fakenet.sh`](/home/arvind/codebase/homelab-projects/proxmox-terraform/infra/rebuild-sandbox-fakenet.sh) and then revalidate an app-backed FakeNet launch.
+- **Windows URL handoff reality:** Edge first-run/sync onboarding can intercept a freshly launched Windows sandbox and hide the submitted URL behind setup screens. Even when backend staging succeeds, the analyst may first see Edge welcome/sign-in UI unless the Windows template is hardened to suppress first-run flows.
+- **Windows URL retry-loop symptom:** if the backend does not accept the first successful Windows handoff, repeated staging retries can spawn a new submitted-URL tab every few seconds. Treat verified presence of `C:\Sandbox\Incoming\submitted-url.txt` and `C:\Users\Public\Desktop\Open Submitted URL.url` as terminal success for Windows URL staging.
+- **Disposable validation rule:** do not run more than one disposable validation VM at a time on summerset. Destroy the test VM immediately after each validation step before starting another one.
 
 ## Sandbox — Network Mode Status
 
@@ -86,6 +90,7 @@ Treat sandbox networking as a segmentation project first and an app feature seco
 - `Submit URL`: accept a URL, launch an ephemeral guest in the selected mode, stage the URL inside the guest, and hand the analyst off to console.
 - `Submit File`: accept a sample upload, launch an ephemeral guest in the selected mode, stage the file inside the guest, and hand the analyst off to console.
 - Both intake modes should stay sandbox-only, default to ephemeral detonation, and avoid mixing uploads or staged artifacts into persistent workspaces.
+- Before calling Windows `Submit URL` complete, also harden the Windows sandbox template so Edge first-run/sync/sign-in prompts do not intercept the analyst workflow.
 
 ### Cross-repo reminder
 

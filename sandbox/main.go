@@ -1282,12 +1282,21 @@ func configureGuestDNSServerWithRetry(ctx context.Context, vmid, templateVMID in
 func stageURLSubmissionWithRetry(ctx context.Context, name string, templateVMID, vmid int, submittedURL string, timeout time.Duration) (string, error) {
 	deadline := time.Now().Add(timeout)
 	var lastErr error
+	windowsStagedPath := `C:\Users\Public\Desktop\Open Submitted URL.url`
 	for {
 		cmdCtx, cancel := context.WithTimeout(ctx, postLaunchCommandTimeout)
 		stagedPath, err := stageURLSubmission(cmdCtx, name, templateVMID, vmid, submittedURL)
 		cancel()
 		if err == nil {
 			return stagedPath, nil
+		}
+		if templateGuestFamily(templateVMID) == "windows" {
+			verifyCtx, verifyCancel := context.WithTimeout(ctx, postLaunchCommandTimeout)
+			verifyErr := verifyWindowsURLSubmissionArtifacts(verifyCtx, vmid, submittedURL)
+			verifyCancel()
+			if verifyErr == nil {
+				return windowsStagedPath, nil
+			}
 		}
 		lastErr = err
 		if time.Now().After(deadline) {
