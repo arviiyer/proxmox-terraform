@@ -1314,7 +1314,9 @@ func stageURLSubmission(ctx context.Context, name string, templateVMID, vmid int
 			submittedURL,
 		)
 		if _, err := runGuestExecCommand(ctx, vmid, "powershell.exe", "-NoProfile", "-NonInteractive", "-Command", ps); err != nil {
-			return "", err
+			if verifyErr := verifyWindowsURLSubmissionArtifacts(ctx, vmid, submittedURL); verifyErr != nil {
+				return "", err
+			}
 		}
 		return stagedPath, nil
 	default:
@@ -1336,6 +1338,12 @@ os.chmod(launcher, 0o755)
 		}
 		return stagedPath, nil
 	}
+}
+
+func verifyWindowsURLSubmissionArtifacts(ctx context.Context, vmid int, submittedURL string) error {
+	ps := fmt.Sprintf(`$submitted=(Test-Path 'C:\Sandbox\Incoming\submitted-url.txt'); $shortcut=(Test-Path 'C:\Users\Public\Desktop\Open Submitted URL.url'); if (-not $submitted -or -not $shortcut) { throw 'windows url staging artifacts missing' }; $url=(Get-Content 'C:\Sandbox\Incoming\submitted-url.txt' -Raw).Trim(); if ($url -ne %q) { throw ('windows url mismatch: ' + $url) }`, submittedURL)
+	_, err := runGuestExecCommand(ctx, vmid, "powershell.exe", "-NoProfile", "-NonInteractive", "-Command", ps)
+	return err
 }
 
 func configureGuestDNSServer(ctx context.Context, vmid, templateVMID int, dnsServer string) error {
