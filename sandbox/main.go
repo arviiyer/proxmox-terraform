@@ -1513,18 +1513,6 @@ func viewURL(view, jobID string) string {
 func extractVMs(show map[string]any, metadata map[string]VMMetadata) map[string]VMEntry {
 	result := map[string]VMEntry{}
 	resources := showResources(show)
-	if len(resources) == 0 {
-		for _, inst := range outputInstances(show) {
-			meta := normalizedMetadata(metadata[inst.Name])
-			result[inst.Name] = VMEntry{
-				VMID:         inst.VMID,
-				TemplateVMID: meta.TemplateVMID,
-				InstanceType: meta.InstanceType,
-				Bridge:       meta.Bridge,
-			}
-		}
-		return result
-	}
 	for _, r := range resources {
 		vals, _ := r["values"].(map[string]any)
 		name, _ := vals["name"].(string)
@@ -1544,9 +1532,6 @@ func extractVMs(show map[string]any, metadata map[string]VMMetadata) map[string]
 
 func parseInstances(show map[string]any) []Instance {
 	resources := showResources(show)
-	if len(resources) == 0 {
-		return outputInstances(show)
-	}
 	var result []Instance
 	for _, r := range resources {
 		vals, _ := r["values"].(map[string]any)
@@ -1560,30 +1545,6 @@ func parseInstances(show map[string]any) []Instance {
 			Name: name,
 			VMID: int(vmidF),
 			Node: node,
-		})
-	}
-	return result
-}
-
-func outputInstances(show map[string]any) []Instance {
-	valuesRoot, _ := show["values"].(map[string]any)
-	outputs, _ := valuesRoot["outputs"].(map[string]any)
-	instancesOut, _ := outputs["instances"].(map[string]any)
-	values, _ := instancesOut["value"].([]any)
-
-	var result []Instance
-	for _, raw := range values {
-		inst, _ := raw.(map[string]any)
-		name, _ := inst["name"].(string)
-		node, _ := inst["node"].(string)
-		vmidF, _ := inst["vm_id"].(float64)
-		if name == "" {
-			continue
-		}
-		result = append(result, Instance{
-			Name: name,
-			Node: node,
-			VMID: int(vmidF),
 		})
 	}
 	return result
