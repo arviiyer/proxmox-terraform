@@ -46,6 +46,10 @@ resource "proxmox_virtual_environment_vm" "vm" {
 
   memory {
     dedicated = lookup(local.flavors, each.value.instance_type, local.flavors["sandbox-medium"]).memory
+    # Enable balloon driver so Proxmox can reclaim unused guest RAM.
+    # floating = 0 means the guest can shrink to 0 MB minimum (host reclaims
+    # whatever the guest balloon driver is not actively using).
+    floating = 0
   }
 
   network_device {

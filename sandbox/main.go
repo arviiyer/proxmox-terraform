@@ -183,12 +183,13 @@ var (
 )
 
 const (
-	postLaunchVMRunningTimeout  = 2 * time.Minute
-	postLaunchGuestReadyTimeout = 8 * time.Minute
-	postLaunchDNSConfigTimeout  = 2 * time.Minute
-	postLaunchURLStageTimeout   = 3 * time.Minute
-	postLaunchCommandTimeout    = 20 * time.Second
-	postLaunchPollInterval      = 5 * time.Second
+	postLaunchVMRunningTimeout      = 2 * time.Minute
+	postLaunchGuestReadyTimeout     = 8 * time.Minute
+	postLaunchSessionReadyTimeout   = 3 * time.Minute
+	postLaunchDNSConfigTimeout      = 2 * time.Minute
+	postLaunchURLStageTimeout       = 3 * time.Minute
+	postLaunchCommandTimeout        = 20 * time.Second
+	postLaunchPollInterval          = 5 * time.Second
 )
 
 func newJob(kind string, names []string) *Job {
@@ -558,6 +559,27 @@ func runLaunchJob(w http.ResponseWriter, r *http.Request, form LaunchForm, kind,
 				} else if err := waitForGuestNetworkReady(ctx, vmid, postLaunchGuestReadyTimeout); err != nil {
 					applyErr = fmt.Errorf("url staging: wait for guest ready: %w", err)
 					log.Printf("job %s: url staging aborted, guest not ready: %v", job.ID, applyErr)
+				} else if templateGuestFamily(form.TemplateVMID) == "windows" {
+					// schtasks /Run /IT only fires when the interactive user session is
+					// established. DHCP (guest network ready) precedes auto-logon, so
+					// we must wait for explorer.exe before invoking staging.
+					log.Printf("job %s: waiting for interactive session on %s before url staging", job.ID, names[0])
+					if err := waitForGuestInteractiveSession(ctx, vmid, postLaunchSessionReadyTimeout); err != nil {
+						applyErr = fmt.Errorf("url staging: wait for interactive session: %w", err)
+						log.Printf("job %s: url staging aborted, session not ready: %v", job.ID, applyErr)
+					} else {
+						log.Printf("job %s: starting url staging for %s", job.ID, names[0])
+						stagedPath, err := stageURLSubmissionWithRetry(ctx, names[0], form.TemplateVMID, vmid, submissionURL, postLaunchURLStageTimeout)
+						if err != nil {
+							applyErr = fmt.Errorf("post-launch url staging: %w", err)
+							log.Printf("job %s: url staging failed: %v", job.ID, applyErr)
+						} else {
+							job.mu.Lock()
+							job.StagedPath = stagedPath
+							job.mu.Unlock()
+							log.Printf("job %s: url staging complete at %s", job.ID, stagedPath)
+						}
+					}
 				} else {
 					log.Printf("job %s: starting url staging for %s", job.ID, names[0])
 					stagedPath, err := stageURLSubmissionWithRetry(ctx, names[0], form.TemplateVMID, vmid, submissionURL, postLaunchURLStageTimeout)
@@ -1253,6 +1275,32 @@ func waitForGuestNetworkReady(ctx context.Context, vmid int, timeout time.Durati
 			}
 		} else {
 			lastErr = err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(postLaunchPollInterval):
+		}
+	}
+}
+
+// waitForGuestInteractiveSession polls until explorer.exe is running in the guest,
+// which indicates the interactive user session (auto-logon) is fully established.
+// Required on Windows before schtasks /Run /IT will fire in the user's session.
+func waitForGuestInteractiveSession(ctx context.Context, vmid int, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	var lastErr error
+	for {
+		cmdCtx, cancel := context.WithTimeout(ctx, postLaunchCommandTimeout)
+		_, err := runGuestExecCommand(cmdCtx, vmid, "powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
+			"if (Get-Process explorer -ErrorAction SilentlyContinue) { exit 0 } else { exit 1 }")
+		cancel()
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+		if time.Now().After(deadline) {
+			return fmt.Errorf("timed out after %v (last error: %v)", timeout, lastErr)
 		}
 		select {
 		case <-ctx.Done():
