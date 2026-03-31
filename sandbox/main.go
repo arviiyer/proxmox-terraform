@@ -1272,8 +1272,25 @@ func configureGuestDNSServerWithRetry(ctx context.Context, vmid, templateVMID in
 func stageURLSubmission(ctx context.Context, name string, templateVMID, vmid int, submittedURL string) (string, error) {
 	switch templateGuestFamily(templateVMID) {
 	case "windows":
-		stagedPath := `C:\Sandbox\Incoming\submitted-url.txt`
-		ps := fmt.Sprintf(`$dir='C:\Sandbox\Incoming'; New-Item -ItemType Directory -Force -Path $dir | Out-Null; Set-Content -Path (Join-Path $dir 'submitted-url.txt') -Value %q`, submittedURL)
+		stagedPath := `C:\Users\Public\Desktop\Open Submitted URL.url`
+		ps := fmt.Sprintf(
+			"$url=%q\n"+
+				"$dir='C:\\Sandbox\\Incoming'\n"+
+				"New-Item -ItemType Directory -Force -Path $dir | Out-Null\n"+
+				"Set-Content -Path (Join-Path $dir 'submitted-url.txt') -Value $url\n\n"+
+				"$shortcut='C:\\Users\\Public\\Desktop\\Open Submitted URL.url'\n"+
+				"$shortcutBody=\"[InternetShortcut]`r`nURL=$url`r`n\"\n"+
+				"Set-Content -Path $shortcut -Value $shortcutBody -Encoding ASCII\n\n"+
+				"$interactiveUser=(Get-CimInstance Win32_ComputerSystem).UserName\n"+
+				"if ($interactiveUser) {\n"+
+				"    $taskName='SandboxOpenSubmittedURL'\n"+
+				"    $triggerTime=(Get-Date).AddMinutes(1).ToString('HH:mm')\n"+
+				"    schtasks.exe /Delete /TN $taskName /F *> $null\n"+
+				"    schtasks.exe /Create /TN $taskName /SC ONCE /ST $triggerTime /TR ('rundll32.exe url.dll,FileProtocolHandler \"' + $url + '\"') /RL HIGHEST /RU $interactiveUser /IT /F *> $null\n"+
+				"    schtasks.exe /Run /TN $taskName *> $null\n"+
+				"}",
+			submittedURL,
+		)
 		if err := runNodeCommand(ctx, "qm", "guest", "exec", strconv.Itoa(vmid), "--", "powershell.exe", "-NoProfile", "-NonInteractive", "-Command", ps); err != nil {
 			return "", err
 		}
