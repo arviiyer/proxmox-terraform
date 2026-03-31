@@ -492,94 +492,12 @@
                             <h3>Submit URL</h3>
                             <p>Launch an ephemeral detonation VM from a suspicious link, stage the URL inside the guest, and hand off directly to console.</p>
                         </button>
-                        <button type="button" class="quick-card active" data-workflow-target="launch-sandbox-panel" aria-expanded="true">
+                        <button type="button" class="quick-card" data-workflow-target="launch-sandbox-panel" aria-expanded="false">
                             <span class="tag">Current Workflow</span>
                             <h3>Launch Sandbox</h3>
                             <p>Provision a clean Windows 11 or Debian detonation VM now, then use console, snapshots, and manual staging during analysis.</p>
                         </button>
                     </div>
-
-                    <section id="submit-file-panel" class="workflow-panel" aria-hidden="true">
-                        <div class="section-header" style="margin-top: 8px;">
-                            <h2>Submit File</h2>
-                        </div>
-
-                        <div class="placeholder-note">`Submit File` is still pending. The planned flow is specimen upload, ephemeral guest launch, in-guest staging, and analyst handoff without mixing samples into persistent workspaces.</div>
-                    </section>
-
-                    <section id="submit-url-panel" class="workflow-panel" aria-hidden="true">
-                        <div class="section-header" style="margin-top: 8px;">
-                            <h2>Submit URL</h2>
-                        </div>
-
-                        <div class="form-card">
-                            <div class="form-card-header">Launch a detonation VM and stage a suspicious URL</div>
-                            <form method="POST" action="/submit-url">
-                                <input type="hidden" name="view" value="sandbox" />
-                                <div class="form-body">
-                                    <div class="form-grid">
-                                        <div class="form-group full">
-                                            <label>Submission URL</label>
-                                            <input name="submission_url" type="text" placeholder="https://example.com/login" required />
-                                            <div class="hint">The URL is staged inside the guest after launch; the analyst then continues from console.</div>
-                                        </div>
-
-                                        <div class="form-group">
-                                            <label>Template</label>
-                                            <select name="template_vmid" required>
-                                                {{range .sandboxTemplates}}
-                                                <option value="{{.VMID}}">{{.Label}} (VMID {{.VMID}})</option>
-                                                {{end}}
-                                            </select>
-                                        </div>
-
-                                        <div class="form-group">
-                                            <label>Instance Type</label>
-                                            <select name="instance_type" required>
-                                                {{range .instanceTypes}}
-                                                <option value="{{.}}" {{if eq . $.defaults.InstanceType}}selected{{end}}>{{.}}</option>
-                                                {{end}}
-                                            </select>
-                                        </div>
-
-                                        <div class="form-group">
-                                            <label>Name Prefix</label>
-                                            <input name="name_prefix" type="text" placeholder="url-run" value="url-run" required />
-                                            <div class="hint">Creates one ephemeral VM like url-run-01.</div>
-                                        </div>
-
-                                        <div class="form-group">
-                                            <label>VMID Start</label>
-                                            <input name="vmid_start" type="number" min="100" max="999999" value="400" required />
-                                            <div class="hint">Use a free detonation VMID.</div>
-                                        </div>
-
-                                        <div class="form-group full">
-                                            <label>Network Mode</label>
-                                            <div class="mode-grid">
-                                                {{range .networkModes}}
-                                                <div class="mode-option">
-                                                    <input type="radio" name="network_mode" id="submit-url-mode-{{.Name}}" value="{{.Name}}" {{if eq .Name $.defaults.NetworkMode}}checked{{end}} />
-                                                    <label class="mode-card" for="submit-url-mode-{{.Name}}">
-                                                        <span class="mode-title">{{.Label}}</span>
-                                                        <span class="mode-bridge">{{.Bridge}}</span>
-                                                        <span class="mode-copy">{{.Description}}</span>
-                                                    </label>
-                                                </div>
-                                                {{end}}
-                                            </div>
-                                            <div class="network-warning" style="display:block">
-                                                URL submissions always launch as ephemeral detonation runs. Internet mode remains sandbox-only and rides `vmbr2`.
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div class="form-footer">
-                                    <button type="submit" class="btn btn-primary">Submit URL</button>
-                                </div>
-                            </form>
-                        </div>
-                    </section>
 
                     <div class="section-header">
                         <h2>Sandbox Instances</h2>
@@ -682,7 +600,89 @@
                         {{end}}
                     </div>
 
-                    <section id="launch-sandbox-panel" class="workflow-panel active" aria-hidden="false">
+                    <section id="submit-file-panel" class="workflow-panel" aria-hidden="true">
+                        <div class="section-header" style="margin-top: 8px;">
+                            <h2>Submit File</h2>
+                        </div>
+
+                        <div class="placeholder-note">`Submit File` is still pending. The planned flow is specimen upload, ephemeral guest launch, in-guest staging, and analyst handoff without mixing samples into persistent workspaces.</div>
+                    </section>
+
+                    <section id="submit-url-panel" class="workflow-panel" aria-hidden="true">
+                        <div class="section-header" style="margin-top: 8px;">
+                            <h2>Submit URL</h2>
+                        </div>
+
+                        <div class="form-card">
+                            <div class="form-card-header">Launch a detonation VM and stage a suspicious URL</div>
+                            <form method="POST" action="/submit-url">
+                                <input type="hidden" name="view" value="sandbox" />
+                                <div class="form-body">
+                                    <div class="form-grid">
+                                        <div class="form-group full">
+                                            <label>Submission URL</label>
+                                            <input name="submission_url" type="text" placeholder="https://example.com/login" required />
+                                            <div class="hint">The URL is staged inside the guest after launch; the analyst then continues from console.</div>
+                                        </div>
+
+                                        <div class="form-group">
+                                            <label>Template</label>
+                                            <select name="template_vmid" required>
+                                                {{range .sandboxTemplates}}
+                                                <option value="{{.VMID}}">{{.Label}} (VMID {{.VMID}})</option>
+                                                {{end}}
+                                            </select>
+                                        </div>
+
+                                        <div class="form-group">
+                                            <label>Instance Type</label>
+                                            <select name="instance_type" required>
+                                                {{range .instanceTypes}}
+                                                <option value="{{.}}" {{if eq . $.defaults.InstanceType}}selected{{end}}>{{.}}</option>
+                                                {{end}}
+                                            </select>
+                                        </div>
+
+                                        <div class="form-group">
+                                            <label>Name Prefix</label>
+                                            <input name="name_prefix" type="text" placeholder="url-run" value="url-run" required />
+                                            <div class="hint">Creates one ephemeral VM like url-run-01.</div>
+                                        </div>
+
+                                        <div class="form-group">
+                                            <label>VMID Start</label>
+                                            <input name="vmid_start" type="number" min="100" max="999999" value="400" required />
+                                            <div class="hint">Use a free detonation VMID.</div>
+                                        </div>
+
+                                        <div class="form-group full">
+                                            <label>Network Mode</label>
+                                            <div class="mode-grid">
+                                                {{range .networkModes}}
+                                                <div class="mode-option">
+                                                    <input type="radio" name="network_mode" id="submit-url-mode-{{.Name}}" value="{{.Name}}" {{if eq .Name $.defaults.NetworkMode}}checked{{end}} />
+                                                    <label class="mode-card" for="submit-url-mode-{{.Name}}">
+                                                        <span class="mode-title">{{.Label}}</span>
+                                                        <span class="mode-bridge">{{.Bridge}}</span>
+                                                        <span class="mode-copy">{{.Description}}</span>
+                                                    </label>
+                                                </div>
+                                                {{end}}
+                                            </div>
+                                            <div class="network-warning" style="display:block">
+                                                URL submissions always launch as ephemeral detonation runs. Internet mode remains sandbox-only and rides `vmbr2`.
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="form-footer">
+                                    <button type="submit" class="btn btn-primary">Submit URL</button>
+                                </div>
+                            </form>
+                        </div>
+                    </section>
+
+                    <section id="launch-sandbox-panel" class="workflow-panel" aria-hidden="true">
                         <div class="section-header" style="margin-top: 8px;">
                             <h2>Launch Sandbox VM</h2>
                         </div>
