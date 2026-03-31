@@ -1443,6 +1443,20 @@ func runGuestExecCommand(ctx context.Context, vmid int, program string, args ...
 		return "", err
 	}
 
+	var immediate guestExecResult
+	if err := json.Unmarshal([]byte(out), &immediate); err == nil && (immediate.Exited || immediate.ExitCode != 0 || immediate.OutData != "" || immediate.ErrData != "") {
+		if immediate.Exited {
+			if immediate.ExitCode != 0 {
+				msg := strings.TrimSpace(strings.Join([]string{immediate.ErrData, immediate.OutData}, "\n"))
+				if msg != "" {
+					return "", fmt.Errorf("guest exec exit code %d: %s", immediate.ExitCode, msg)
+				}
+				return "", fmt.Errorf("guest exec exit code %d", immediate.ExitCode)
+			}
+			return immediate.OutData, nil
+		}
+	}
+
 	var started struct {
 		PID int `json:"pid"`
 	}
