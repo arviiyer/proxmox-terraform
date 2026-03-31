@@ -470,6 +470,13 @@ func runLaunchJob(w http.ResponseWriter, r *http.Request, form LaunchForm, kind,
 
 	existingVMs := map[string]VMEntry{}
 	if show, err := runner.ShowJSON(ctx); err == nil {
+		show, err = pruneMissingStateEntries(ctx, runner, show)
+		if err != nil {
+			applyLock.Unlock()
+			cancel()
+			http.Error(w, "prune stale state: "+err.Error(), 500)
+			return
+		}
 		existingVMs = extractVMs(show, loadMetadata())
 	}
 
@@ -597,6 +604,13 @@ func handleDestroy(w http.ResponseWriter, r *http.Request) {
 
 	existingVMs := map[string]VMEntry{}
 	if show, err := runner.ShowJSON(ctx); err == nil {
+		show, err = pruneMissingStateEntries(ctx, runner, show)
+		if err != nil {
+			applyLock.Unlock()
+			cancel()
+			http.Error(w, "prune stale state: "+err.Error(), 500)
+			return
+		}
 		existingVMs = extractVMs(show, loadMetadata())
 	}
 
@@ -1636,6 +1650,60 @@ func repairStaleInstances(instances []Instance) {
 		saveEphemeral(eph)
 		ephemeralMu.Unlock()
 	}()
+}
+
+func pruneMissingStateEntries(ctx context.Context, runner tf.Runner, show map[string]any) (map[string]any, error) {
+	instances := parseInstances(show)
+	if len(instances) == 0 {
+		return show, nil
+	}
+
+	var stale []Instance
+	for _, inst := range instances {
+		_, missing := liveVMStatus(ctx, inst.VMID)
+		if missing {
+			stale = append(stale, inst)
+		}
+	}
+	if len(stale) == 0 {
+		return show, nil
+	}
+
+	for _, inst := range stale {
+		target := fmt.Sprintf("proxmox_virtual_environment_vm.vm[%q]", inst.Name)
+		if _, err := runner.StateRm(ctx, target); err != nil && !strings.Contains(strings.ToLower(err.Error()), "no matching objects found") {
+			return nil, fmt.Errorf("state rm %s: %w", inst.Name, err)
+		}
+	}
+	removeInstancesFromBookkeeping(stale)
+
+	refreshed, err := runner.ShowJSON(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return refreshed, nil
+}
+
+func removeInstancesFromBookkeeping(instances []Instance) {
+	if len(instances) == 0 {
+		return
+	}
+
+	metadataMu.Lock()
+	meta := loadMetadata()
+	for _, inst := range instances {
+		delete(meta, inst.Name)
+	}
+	saveMetadata(meta)
+	metadataMu.Unlock()
+
+	ephemeralMu.Lock()
+	eph := loadEphemeral()
+	for _, inst := range instances {
+		delete(eph, inst.Name)
+	}
+	saveEphemeral(eph)
+	ephemeralMu.Unlock()
 }
 
 func nodeSSHHost() (string, error) {
