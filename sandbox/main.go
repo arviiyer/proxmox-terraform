@@ -186,6 +186,7 @@ const (
 	postLaunchVMRunningTimeout  = 2 * time.Minute
 	postLaunchGuestReadyTimeout = 8 * time.Minute
 	postLaunchDNSConfigTimeout  = 2 * time.Minute
+	postLaunchURLStageTimeout   = 3 * time.Minute
 	postLaunchCommandTimeout    = 20 * time.Second
 	postLaunchPollInterval      = 5 * time.Second
 )
@@ -552,7 +553,7 @@ func runLaunchJob(w http.ResponseWriter, r *http.Request, form LaunchForm, kind,
 				applyErr = fmt.Errorf("post-launch network config: %w", err)
 			}
 			if applyErr == nil && submissionURL != "" {
-				stagedPath, err := stageURLSubmission(ctx, names[0], form.TemplateVMID, newVMs[names[0]].VMID, submissionURL)
+				stagedPath, err := stageURLSubmissionWithRetry(ctx, names[0], form.TemplateVMID, newVMs[names[0]].VMID, submissionURL, postLaunchURLStageTimeout)
 				if err != nil {
 					applyErr = fmt.Errorf("post-launch url staging: %w", err)
 				} else {
@@ -1264,6 +1265,28 @@ func configureGuestDNSServerWithRetry(ctx context.Context, vmid, templateVMID in
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
+		case <-time.After(postLaunchPollInterval):
+		}
+	}
+}
+
+func stageURLSubmissionWithRetry(ctx context.Context, name string, templateVMID, vmid int, submittedURL string, timeout time.Duration) (string, error) {
+	deadline := time.Now().Add(timeout)
+	var lastErr error
+	for {
+		cmdCtx, cancel := context.WithTimeout(ctx, postLaunchCommandTimeout)
+		stagedPath, err := stageURLSubmission(cmdCtx, name, templateVMID, vmid, submittedURL)
+		cancel()
+		if err == nil {
+			return stagedPath, nil
+		}
+		lastErr = err
+		if time.Now().After(deadline) {
+			return "", fmt.Errorf("timed out after %v (last error: %v)", timeout, lastErr)
+		}
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
 		case <-time.After(postLaunchPollInterval):
 		}
 	}
