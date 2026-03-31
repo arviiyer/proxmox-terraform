@@ -1333,13 +1333,14 @@ func stageURLSubmission(ctx context.Context, name string, templateVMID, vmid int
 				"$shortcutBody=\"[InternetShortcut]`r`nURL=$url`r`n\"\n"+
 				"Set-Content -Path $shortcut -Value $shortcutBody -Encoding ASCII\n\n"+
 				"$taskName='SandboxOpenSubmittedURL'\n"+
-				"$triggerTime=(Get-Date).AddMinutes(1).ToString('HH:mm')\n"+
+				// Push the scheduled trigger 24h out so it never fires on an ephemeral VM.
+				// Only the immediate schtasks /Run matters; the backup trigger is a no-op.
+				"$triggerTime=(Get-Date).AddHours(24).ToString('HH:mm')\n"+
 				"$msedge=(Get-ItemProperty 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\msedge.exe' -ErrorAction SilentlyContinue).'(Default)'\n"+
 				"if (-not $msedge) { $msedge='C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe' }\n"+
 				"$taskCommand='\"' + $msedge + '\" --no-first-run --no-default-browser-check ' + $url\n"+
 				"schtasks.exe /Create /TN $taskName /SC ONCE /ST $triggerTime /TR $taskCommand /IT /RU analyst /F | Out-Null\n"+
 				"schtasks.exe /Run /TN $taskName | Out-Null\n"+
-				"schtasks.exe /Delete /TN $taskName /F | Out-Null\n"+
 				"exit 0\n",
 			submittedURL,
 		)
