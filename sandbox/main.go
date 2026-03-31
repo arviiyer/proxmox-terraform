@@ -286,26 +286,12 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 		instances = parseInstances(show)
 	}
 
-	// Fetch power states in parallel.
 	ephemeral := loadEphemeral()
 	metadata := loadMetadata()
-	var wg sync.WaitGroup
-	for i := range instances {
-		instances[i].Ephemeral = ephemeral[instances[i].Name]
-		meta := normalizedMetadata(metadata[instances[i].Name])
-		instances[i].OS = templateOSLabel(meta.TemplateVMID)
-		instances[i].View = templateView(meta.TemplateVMID)
-		instances[i].Network = networkModeLabel(meta.NetworkMode)
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			st, err := pveClient.VMStatus(instances[i].Node, instances[i].VMID)
-			if err == nil {
-				instances[i].Status = st
-			}
-		}(i)
+	instances, staleInstances := hydrateInstances(ctx, instances, ephemeral, metadata)
+	if len(staleInstances) > 0 {
+		go repairStaleInstances(staleInstances)
 	}
-	wg.Wait()
 
 	// Resolve active job from URL — used for the banner.
 	var activeJob *Job
@@ -1314,7 +1300,7 @@ func stageURLSubmission(ctx context.Context, name string, templateVMID, vmid int
 				"}",
 			submittedURL,
 		)
-		if err := runNodeCommand(ctx, "qm", "guest", "exec", strconv.Itoa(vmid), "--", "powershell.exe", "-NoProfile", "-NonInteractive", "-Command", ps); err != nil {
+		if _, err := runGuestExecCommand(ctx, vmid, "powershell.exe", "-NoProfile", "-NonInteractive", "-Command", ps); err != nil {
 			return "", err
 		}
 		return stagedPath, nil
@@ -1332,7 +1318,7 @@ launcher = base / "open-url.sh"
 launcher.write_text("#!/bin/sh\nxdg-open " + shlex.quote(url) + "\n")
 os.chmod(launcher, 0o755)
 `, submittedURL)
-		if err := runNodeCommand(ctx, "qm", "guest", "exec", strconv.Itoa(vmid), "--", "python3", "-c", py); err != nil {
+		if _, err := runGuestExecCommand(ctx, vmid, "python3", "-c", py); err != nil {
 			return "", err
 		}
 		return stagedPath, nil
@@ -1343,7 +1329,8 @@ func configureGuestDNSServer(ctx context.Context, vmid, templateVMID int, dnsSer
 	switch templateGuestFamily(templateVMID) {
 	case "windows":
 		ps := fmt.Sprintf(`$adapter=(Get-NetAdapter | Where-Object Status -eq 'Up' | Select-Object -First 1 -ExpandProperty Name); if (-not $adapter) { throw 'no active adapter found' }; Set-DnsClientServerAddress -InterfaceAlias $adapter -ServerAddresses %s`, dnsServer)
-		return runNodeCommand(ctx, "qm", "guest", "exec", strconv.Itoa(vmid), "--", "powershell.exe", "-NoProfile", "-NonInteractive", "-Command", ps)
+		_, err := runGuestExecCommand(ctx, vmid, "powershell.exe", "-NoProfile", "-NonInteractive", "-Command", ps)
+		return err
 	default:
 		py := fmt.Sprintf(`from pathlib import Path
 import re
@@ -1367,7 +1354,8 @@ for cmd in (["systemctl", "restart", "dhcpcd"], ["service", "dhcpcd", "restart"]
 
 time.sleep(2)
 Path("/etc/resolv.conf").write_text(f"nameserver {dns}\n")`, dnsServer)
-		return runNodeCommand(ctx, "qm", "guest", "exec", strconv.Itoa(vmid), "--", "python3", "-c", py)
+		_, err := runGuestExecCommand(ctx, vmid, "python3", "-c", py)
+		return err
 	}
 }
 
@@ -1375,9 +1363,10 @@ func verifyGuestDNSServer(ctx context.Context, vmid, templateVMID int, dnsServer
 	switch templateGuestFamily(templateVMID) {
 	case "windows":
 		ps := fmt.Sprintf(`$adapter=(Get-NetAdapter | Where-Object Status -eq 'Up' | Select-Object -First 1 -ExpandProperty Name); if (-not $adapter) { throw 'no active adapter found' }; $servers=(Get-DnsClientServerAddress -InterfaceAlias $adapter -AddressFamily IPv4).ServerAddresses; if ($servers -notcontains %q) { throw ('dns server not applied: ' + ($servers -join ',')) }`, dnsServer)
-		return runNodeCommand(ctx, "qm", "guest", "exec", strconv.Itoa(vmid), "--", "powershell.exe", "-NoProfile", "-NonInteractive", "-Command", ps)
+		_, err := runGuestExecCommand(ctx, vmid, "powershell.exe", "-NoProfile", "-NonInteractive", "-Command", ps)
+		return err
 	default:
-		out, err := runNodeCommandOutput(ctx, "qm", "guest", "exec", strconv.Itoa(vmid), "--", "python3", "-c", `from pathlib import Path; print(Path("/etc/resolv.conf").read_text())`)
+		out, err := runGuestExecCommand(ctx, vmid, "python3", "-c", `from pathlib import Path; print(Path("/etc/resolv.conf").read_text())`)
 		if err != nil {
 			return err
 		}
@@ -1438,6 +1427,64 @@ func runNodeCommand(ctx context.Context, args ...string) error {
 	return err
 }
 
+type guestExecResult struct {
+	Exited   bool   `json:"exited"`
+	ExitCode int    `json:"exitcode"`
+	OutData  string `json:"out-data"`
+	ErrData  string `json:"err-data"`
+}
+
+func runGuestExecCommand(ctx context.Context, vmid int, program string, args ...string) (string, error) {
+	cmdArgs := []string{"qm", "guest", "exec", strconv.Itoa(vmid), "--", program}
+	cmdArgs = append(cmdArgs, args...)
+
+	out, err := runNodeCommandOutput(ctx, cmdArgs...)
+	if err != nil {
+		return "", err
+	}
+
+	var started struct {
+		PID int `json:"pid"`
+	}
+	if err := json.Unmarshal([]byte(out), &started); err != nil {
+		return "", fmt.Errorf("parse guest exec pid: %w", err)
+	}
+	if started.PID <= 0 {
+		return "", fmt.Errorf("guest exec did not return a pid")
+	}
+
+	deadline := time.Now().Add(postLaunchCommandTimeout)
+	for {
+		statusOut, err := runNodeCommandOutput(ctx, "qm", "guest", "exec-status", strconv.Itoa(vmid), strconv.Itoa(started.PID))
+		if err != nil {
+			return "", err
+		}
+
+		var status guestExecResult
+		if err := json.Unmarshal([]byte(statusOut), &status); err != nil {
+			return "", fmt.Errorf("parse guest exec status: %w", err)
+		}
+		if status.Exited {
+			if status.ExitCode != 0 {
+				msg := strings.TrimSpace(strings.Join([]string{status.ErrData, status.OutData}, "\n"))
+				if msg != "" {
+					return "", fmt.Errorf("guest exec exit code %d: %s", status.ExitCode, msg)
+				}
+				return "", fmt.Errorf("guest exec exit code %d", status.ExitCode)
+			}
+			return status.OutData, nil
+		}
+		if time.Now().After(deadline) {
+			return "", fmt.Errorf("guest exec timed out after %v", postLaunchCommandTimeout)
+		}
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
+}
+
 func runNodeCommandOutput(ctx context.Context, args ...string) (string, error) {
 	host, err := nodeSSHHost()
 	if err != nil {
@@ -1465,6 +1512,118 @@ func runNodeCommandOutput(ctx context.Context, args ...string) (string, error) {
 		return "", fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out)))
 	}
 	return string(out), nil
+}
+
+func hydrateInstances(ctx context.Context, instances []Instance, ephemeral map[string]bool, metadata map[string]VMMetadata) ([]Instance, []Instance) {
+	type result struct {
+		index   int
+		status  string
+		missing bool
+	}
+
+	results := make(chan result, len(instances))
+	var wg sync.WaitGroup
+	for i := range instances {
+		instances[i].Ephemeral = ephemeral[instances[i].Name]
+		meta := normalizedMetadata(metadata[instances[i].Name])
+		instances[i].OS = templateOSLabel(meta.TemplateVMID)
+		instances[i].View = templateView(meta.TemplateVMID)
+		instances[i].Network = networkModeLabel(meta.NetworkMode)
+
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			status, missing := liveVMStatus(ctx, instances[i].VMID)
+			results <- result{index: i, status: status, missing: missing}
+		}(i)
+	}
+	wg.Wait()
+	close(results)
+
+	missing := map[int]bool{}
+	for res := range results {
+		if res.missing {
+			missing[res.index] = true
+			continue
+		}
+		instances[res.index].Status = res.status
+	}
+
+	var live []Instance
+	var stale []Instance
+	for i, inst := range instances {
+		if missing[i] {
+			stale = append(stale, inst)
+			continue
+		}
+		live = append(live, inst)
+	}
+	return live, stale
+}
+
+func liveVMStatus(ctx context.Context, vmid int) (string, bool) {
+	cmdCtx, cancel := context.WithTimeout(ctx, postLaunchCommandTimeout)
+	defer cancel()
+
+	out, err := runNodeCommandOutput(cmdCtx, "qm", "status", strconv.Itoa(vmid))
+	if err != nil {
+		return "", isMissingVMError(err)
+	}
+	if vmStatusRunning(out) {
+		return "running", false
+	}
+	if strings.Contains(out, "status: stopped") {
+		return "stopped", false
+	}
+	return "", false
+}
+
+func isMissingVMError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "does not exist") ||
+		strings.Contains(msg, "no such file or directory") ||
+		strings.Contains(msg, "vm not found") ||
+		strings.Contains(msg, "no such vm")
+}
+
+func repairStaleInstances(instances []Instance) {
+	if len(instances) == 0 || !applyLock.TryLock() {
+		return
+	}
+
+	go func() {
+		defer applyLock.Unlock()
+
+		runner := tf.Runner{Dir: cfg.TerraformDir}
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		for _, inst := range instances {
+			target := fmt.Sprintf("proxmox_virtual_environment_vm.vm[%q]", inst.Name)
+			if _, err := runner.StateRm(ctx, target); err != nil && !strings.Contains(strings.ToLower(err.Error()), "no matching objects found") {
+				log.Printf("stale instance cleanup: state rm %s failed: %v", inst.Name, err)
+			}
+		}
+
+		metadataMu.Lock()
+		meta := loadMetadata()
+		for _, inst := range instances {
+			delete(meta, inst.Name)
+		}
+		saveMetadata(meta)
+		metadataMu.Unlock()
+
+		ephemeralMu.Lock()
+		eph := loadEphemeral()
+		for _, inst := range instances {
+			delete(eph, inst.Name)
+		}
+		saveEphemeral(eph)
+		ephemeralMu.Unlock()
+	}()
 }
 
 func nodeSSHHost() (string, error) {

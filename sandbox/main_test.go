@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"net/http/httptest"
 	"net/url"
 	"strings"
@@ -223,5 +224,26 @@ func TestParseURLSubmissionFormRejectsInvalidURL(t *testing.T) {
 
 	if _, err := parseURLSubmissionForm(req); err == nil {
 		t.Fatal("parseURLSubmissionForm succeeded, want error")
+	}
+}
+
+func TestIsMissingVMError(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "nil", err: nil, want: false},
+		{name: "missing config", err: fmt.Errorf("Configuration file 'nodes/summerset/qemu-server/400.conf' does not exist"), want: true},
+		{name: "no such vm", err: fmt.Errorf("VM 400 qga command failed - no such VM"), want: true},
+		{name: "other error", err: fmt.Errorf("permission denied"), want: false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isMissingVMError(tc.err); got != tc.want {
+				t.Fatalf("isMissingVMError(%v) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
 	}
 }
