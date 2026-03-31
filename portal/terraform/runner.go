@@ -38,6 +38,11 @@ func (r Runner) Destroy(ctx context.Context, target, varFile string) (string, er
 		"-target", target, "-var-file", varFile)
 }
 
+// StateRm removes a resource from Terraform state without modifying live infra.
+func (r Runner) StateRm(ctx context.Context, target string) (string, error) {
+	return r.runCombined(ctx, "state", "rm", target)
+}
+
 // OutputJSON returns `terraform output -json` parsed.
 func (r Runner) OutputJSON(ctx context.Context) (map[string]any, error) {
 	out, err := r.runCapture(ctx, "output", "-json")
