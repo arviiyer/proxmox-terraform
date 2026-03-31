@@ -550,16 +550,26 @@ func runLaunchJob(w http.ResponseWriter, r *http.Request, form LaunchForm, kind,
 				log.Printf("job %s: post-launch network config failed: %v", job.ID, applyErr)
 			}
 			if applyErr == nil && submissionURL != "" {
-				log.Printf("job %s: starting url staging for %s", job.ID, names[0])
-				stagedPath, err := stageURLSubmissionWithRetry(ctx, names[0], form.TemplateVMID, newVMs[names[0]].VMID, submissionURL, postLaunchURLStageTimeout)
-				if err != nil {
-					applyErr = fmt.Errorf("post-launch url staging: %w", err)
-					log.Printf("job %s: url staging failed: %v", job.ID, applyErr)
+				vmid := newVMs[names[0]].VMID
+				log.Printf("job %s: waiting for guest agent on %s (vmid %d) before url staging", job.ID, names[0], vmid)
+				if err := waitForVMRunning(ctx, vmid, postLaunchVMRunningTimeout); err != nil {
+					applyErr = fmt.Errorf("url staging: wait for vm running: %w", err)
+					log.Printf("job %s: url staging aborted, vm not running: %v", job.ID, applyErr)
+				} else if err := waitForGuestNetworkReady(ctx, vmid, postLaunchGuestReadyTimeout); err != nil {
+					applyErr = fmt.Errorf("url staging: wait for guest ready: %w", err)
+					log.Printf("job %s: url staging aborted, guest not ready: %v", job.ID, applyErr)
 				} else {
-					job.mu.Lock()
-					job.StagedPath = stagedPath
-					job.mu.Unlock()
-					log.Printf("job %s: url staging complete at %s", job.ID, stagedPath)
+					log.Printf("job %s: starting url staging for %s", job.ID, names[0])
+					stagedPath, err := stageURLSubmissionWithRetry(ctx, names[0], form.TemplateVMID, vmid, submissionURL, postLaunchURLStageTimeout)
+					if err != nil {
+						applyErr = fmt.Errorf("post-launch url staging: %w", err)
+						log.Printf("job %s: url staging failed: %v", job.ID, applyErr)
+					} else {
+						job.mu.Lock()
+						job.StagedPath = stagedPath
+						job.mu.Unlock()
+						log.Printf("job %s: url staging complete at %s", job.ID, stagedPath)
+					}
 				}
 			}
 
