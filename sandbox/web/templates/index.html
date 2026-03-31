@@ -123,6 +123,15 @@
                 border-radius: 14px; padding: 18px;
                 color: #eff6ff; min-height: 168px;
                 box-shadow: 0 12px 22px rgba(8,25,40,0.14);
+                width: 100%;
+                text-align: left;
+                cursor: pointer;
+                transition: transform 0.14s ease, box-shadow 0.14s ease, border-color 0.14s ease;
+            }
+            .quick-card:hover { transform: translateY(-1px); box-shadow: 0 16px 28px rgba(8,25,40,0.18); }
+            .quick-card.active {
+                border-color: rgba(253, 217, 176, 0.68);
+                box-shadow: 0 0 0 2px rgba(252, 217, 176, 0.18), 0 16px 28px rgba(8,25,40,0.2);
             }
             .quick-card h3 { margin: 0 0 8px; font-size: 22px; }
             .quick-card p { margin: 0; color: #bfdbfe; font-size: 14px; line-height: 1.55; }
@@ -158,6 +167,8 @@
                 color: #9a3412; border-radius: 10px;
                 font-size: 13px; margin-bottom: 20px;
             }
+            .workflow-panel { display: none; margin-bottom: 24px; }
+            .workflow-panel.active { display: block; }
 
             /* Section heading */
             .section-header {
@@ -471,96 +482,104 @@
                     </section>
 
                     <div class="quick-grid">
-                        <div class="quick-card">
+                        <button type="button" class="quick-card" data-workflow-target="submit-file-panel" aria-expanded="false">
                             <span class="tag">Planned Intake</span>
                             <h3>Submit File</h3>
                             <p>Stage a specimen into a disposable VM without turning detonation hosts into long-lived analyst workstations.</p>
-                        </div>
-                        <div class="quick-card">
+                        </button>
+                        <button type="button" class="quick-card" data-workflow-target="submit-url-panel" aria-expanded="false">
                             <span class="tag">URL Intake</span>
                             <h3>Submit URL</h3>
                             <p>Launch an ephemeral detonation VM from a suspicious link, stage the URL inside the guest, and hand off directly to console.</p>
-                        </div>
-                        <div class="quick-card">
+                        </button>
+                        <button type="button" class="quick-card active" data-workflow-target="launch-sandbox-panel" aria-expanded="true">
                             <span class="tag">Current Workflow</span>
                             <h3>Launch Sandbox</h3>
                             <p>Provision a clean Windows 11 or Debian detonation VM now, then use console, snapshots, and manual staging during analysis.</p>
+                        </button>
+                    </div>
+
+                    <section id="submit-file-panel" class="workflow-panel" aria-hidden="true">
+                        <div class="section-header" style="margin-top: 8px;">
+                            <h2>Submit File</h2>
                         </div>
-                    </div>
 
-                    <div class="placeholder-note">`Submit URL` is now live as a staged handoff flow. `Submit File` and deeper in-guest automation are still pending.</div>
+                        <div class="placeholder-note">`Submit File` is still pending. The planned flow is specimen upload, ephemeral guest launch, in-guest staging, and analyst handoff without mixing samples into persistent workspaces.</div>
+                    </section>
 
-                    <div class="section-header" style="margin-top: 8px;">
-                        <h2>Submit URL</h2>
-                    </div>
+                    <section id="submit-url-panel" class="workflow-panel" aria-hidden="true">
+                        <div class="section-header" style="margin-top: 8px;">
+                            <h2>Submit URL</h2>
+                        </div>
 
-                    <div class="form-card">
-                        <div class="form-card-header">Launch a detonation VM and stage a suspicious URL</div>
-                        <form method="POST" action="/submit-url">
-                            <input type="hidden" name="view" value="sandbox" />
-                            <div class="form-body">
-                                <div class="form-grid">
-                                    <div class="form-group full">
-                                        <label>Submission URL</label>
-                                        <input name="submission_url" type="text" placeholder="https://example.com/login" required />
-                                        <div class="hint">The URL is staged inside the guest after launch; the analyst then continues from console.</div>
-                                    </div>
-
-                                    <div class="form-group">
-                                        <label>Template</label>
-                                        <select name="template_vmid" required>
-                                            {{range .sandboxTemplates}}
-                                            <option value="{{.VMID}}">{{.Label}} (VMID {{.VMID}})</option>
-                                            {{end}}
-                                        </select>
-                                    </div>
-
-                                    <div class="form-group">
-                                        <label>Instance Type</label>
-                                        <select name="instance_type" required>
-                                            {{range .instanceTypes}}
-                                            <option value="{{.}}" {{if eq . $.defaults.InstanceType}}selected{{end}}>{{.}}</option>
-                                            {{end}}
-                                        </select>
-                                    </div>
-
-                                    <div class="form-group">
-                                        <label>Name Prefix</label>
-                                        <input name="name_prefix" type="text" placeholder="url-run" value="url-run" required />
-                                        <div class="hint">Creates one ephemeral VM like url-run-01.</div>
-                                    </div>
-
-                                    <div class="form-group">
-                                        <label>VMID Start</label>
-                                        <input name="vmid_start" type="number" min="100" max="999999" value="400" required />
-                                        <div class="hint">Use a free detonation VMID.</div>
-                                    </div>
-
-                                    <div class="form-group full">
-                                        <label>Network Mode</label>
-                                        <div class="mode-grid">
-                                            {{range .networkModes}}
-                                            <div class="mode-option">
-                                                <input type="radio" name="network_mode" id="submit-url-mode-{{.Name}}" value="{{.Name}}" {{if eq .Name $.defaults.NetworkMode}}checked{{end}} />
-                                                <label class="mode-card" for="submit-url-mode-{{.Name}}">
-                                                    <span class="mode-title">{{.Label}}</span>
-                                                    <span class="mode-bridge">{{.Bridge}}</span>
-                                                    <span class="mode-copy">{{.Description}}</span>
-                                                </label>
-                                            </div>
-                                            {{end}}
+                        <div class="form-card">
+                            <div class="form-card-header">Launch a detonation VM and stage a suspicious URL</div>
+                            <form method="POST" action="/submit-url">
+                                <input type="hidden" name="view" value="sandbox" />
+                                <div class="form-body">
+                                    <div class="form-grid">
+                                        <div class="form-group full">
+                                            <label>Submission URL</label>
+                                            <input name="submission_url" type="text" placeholder="https://example.com/login" required />
+                                            <div class="hint">The URL is staged inside the guest after launch; the analyst then continues from console.</div>
                                         </div>
-                                        <div class="network-warning" style="display:block">
-                                            URL submissions always launch as ephemeral detonation runs. Internet mode remains sandbox-only and rides `vmbr2`.
+
+                                        <div class="form-group">
+                                            <label>Template</label>
+                                            <select name="template_vmid" required>
+                                                {{range .sandboxTemplates}}
+                                                <option value="{{.VMID}}">{{.Label}} (VMID {{.VMID}})</option>
+                                                {{end}}
+                                            </select>
+                                        </div>
+
+                                        <div class="form-group">
+                                            <label>Instance Type</label>
+                                            <select name="instance_type" required>
+                                                {{range .instanceTypes}}
+                                                <option value="{{.}}" {{if eq . $.defaults.InstanceType}}selected{{end}}>{{.}}</option>
+                                                {{end}}
+                                            </select>
+                                        </div>
+
+                                        <div class="form-group">
+                                            <label>Name Prefix</label>
+                                            <input name="name_prefix" type="text" placeholder="url-run" value="url-run" required />
+                                            <div class="hint">Creates one ephemeral VM like url-run-01.</div>
+                                        </div>
+
+                                        <div class="form-group">
+                                            <label>VMID Start</label>
+                                            <input name="vmid_start" type="number" min="100" max="999999" value="400" required />
+                                            <div class="hint">Use a free detonation VMID.</div>
+                                        </div>
+
+                                        <div class="form-group full">
+                                            <label>Network Mode</label>
+                                            <div class="mode-grid">
+                                                {{range .networkModes}}
+                                                <div class="mode-option">
+                                                    <input type="radio" name="network_mode" id="submit-url-mode-{{.Name}}" value="{{.Name}}" {{if eq .Name $.defaults.NetworkMode}}checked{{end}} />
+                                                    <label class="mode-card" for="submit-url-mode-{{.Name}}">
+                                                        <span class="mode-title">{{.Label}}</span>
+                                                        <span class="mode-bridge">{{.Bridge}}</span>
+                                                        <span class="mode-copy">{{.Description}}</span>
+                                                    </label>
+                                                </div>
+                                                {{end}}
+                                            </div>
+                                            <div class="network-warning" style="display:block">
+                                                URL submissions always launch as ephemeral detonation runs. Internet mode remains sandbox-only and rides `vmbr2`.
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
-                            </div>
-                            <div class="form-footer">
-                                <button type="submit" class="btn btn-primary">Submit URL</button>
-                            </div>
-                        </form>
-                    </div>
+                                <div class="form-footer">
+                                    <button type="submit" class="btn btn-primary">Submit URL</button>
+                                </div>
+                            </form>
+                        </div>
+                    </section>
 
                     <div class="section-header">
                         <h2>Sandbox Instances</h2>
@@ -663,89 +682,91 @@
                         {{end}}
                     </div>
 
-                    <div class="section-header" style="margin-top: 8px;">
-                        <h2>Launch Sandbox VM</h2>
-                    </div>
+                    <section id="launch-sandbox-panel" class="workflow-panel active" aria-hidden="false">
+                        <div class="section-header" style="margin-top: 8px;">
+                            <h2>Launch Sandbox VM</h2>
+                        </div>
 
-                    <div class="form-card">
-                        <div class="form-card-header">Configure a disposable detonation VM</div>
-                        <form id="launch-sandbox-form" method="POST" action="/launch">
-                            <input type="hidden" name="view" value="sandbox" />
-                            <div class="form-body">
-                                <div class="form-grid">
-                                    <div class="form-group">
-                                        <label>Template</label>
-                                        <select name="template_vmid" required>
-                                            {{range .sandboxTemplates}}
-                                            <option value="{{.VMID}}">{{.Label}} (VMID {{.VMID}})</option>
-                                            {{end}}
-                                        </select>
-                                    </div>
-
-                                    <div class="form-group">
-                                        <label>Instance Type</label>
-                                        <select name="instance_type" required>
-                                            {{range .instanceTypes}}
-                                            <option value="{{.}}" {{if eq . $.defaults.InstanceType}}selected{{end}}>{{.}}</option>
-                                            {{end}}
-                                        </select>
-                                    </div>
-
-                                    <div class="form-group">
-                                        <label>Name Prefix</label>
-                                        <input name="name_prefix" type="text" placeholder="detonation" required />
-                                        <div class="hint">Creates prefix-01, prefix-02, …</div>
-                                    </div>
-
-                                    <div class="form-group">
-                                        <label>VMID Start</label>
-                                        <input name="vmid_start" type="number" min="100" max="999999" value="200" required />
-                                        <div class="hint">Use a free range outside the template VMIDs.</div>
-                                    </div>
-
-                                    <div class="form-group">
-                                        <label>Count</label>
-                                        <input name="count" type="number" min="1" max="10" value="1" />
-                                    </div>
-
-                                    <div class="form-group full">
-                                        <label>Network Mode</label>
-                                        <div class="mode-grid">
-                                            {{range .networkModes}}
-                                            <div class="mode-option">
-                                                <input type="radio" name="network_mode" id="mode-{{.Name}}" value="{{.Name}}" {{if eq .Name $.defaults.NetworkMode}}checked{{end}} />
-                                                <label class="mode-card" for="mode-{{.Name}}">
-                                                    <span class="mode-title">{{.Label}}</span>
-                                                    <span class="mode-bridge">{{.Bridge}}</span>
-                                                    <span class="mode-copy">{{.Description}}</span>
-                                                </label>
-                                            </div>
-                                            {{end}}
+                        <div class="form-card">
+                            <div class="form-card-header">Configure a disposable detonation VM</div>
+                            <form id="launch-sandbox-form" method="POST" action="/launch">
+                                <input type="hidden" name="view" value="sandbox" />
+                                <div class="form-body">
+                                    <div class="form-grid">
+                                        <div class="form-group">
+                                            <label>Template</label>
+                                            <select name="template_vmid" required>
+                                                {{range .sandboxTemplates}}
+                                                <option value="{{.VMID}}">{{.Label}} (VMID {{.VMID}})</option>
+                                                {{end}}
+                                            </select>
                                         </div>
-                                        <div class="network-warning" id="network-warning">
-                                            Internet mode is restricted to ephemeral detonation only and must ride the dedicated public-analysis bridge.
-                                        </div>
-                                    </div>
 
-                                    <div class="form-group">
-                                        <label>&nbsp;</label>
-                                        <div>
-                                            <div class="checkbox-row">
-                                                <input type="checkbox" name="ephemeral" id="ephemeral-cb" checked />
-                                                <label for="ephemeral-cb">Ephemeral — auto-destroy when powered off</label>
+                                        <div class="form-group">
+                                            <label>Instance Type</label>
+                                            <select name="instance_type" required>
+                                                {{range .instanceTypes}}
+                                                <option value="{{.}}" {{if eq . $.defaults.InstanceType}}selected{{end}}>{{.}}</option>
+                                                {{end}}
+                                            </select>
+                                        </div>
+
+                                        <div class="form-group">
+                                            <label>Name Prefix</label>
+                                            <input name="name_prefix" type="text" placeholder="detonation" required />
+                                            <div class="hint">Creates prefix-01, prefix-02, …</div>
+                                        </div>
+
+                                        <div class="form-group">
+                                            <label>VMID Start</label>
+                                            <input name="vmid_start" type="number" min="100" max="999999" value="200" required />
+                                            <div class="hint">Use a free range outside the template VMIDs.</div>
+                                        </div>
+
+                                        <div class="form-group">
+                                            <label>Count</label>
+                                            <input name="count" type="number" min="1" max="10" value="1" />
+                                        </div>
+
+                                        <div class="form-group full">
+                                            <label>Network Mode</label>
+                                            <div class="mode-grid">
+                                                {{range .networkModes}}
+                                                <div class="mode-option">
+                                                    <input type="radio" name="network_mode" id="mode-{{.Name}}" value="{{.Name}}" {{if eq .Name $.defaults.NetworkMode}}checked{{end}} />
+                                                    <label class="mode-card" for="mode-{{.Name}}">
+                                                        <span class="mode-title">{{.Label}}</span>
+                                                        <span class="mode-bridge">{{.Bridge}}</span>
+                                                        <span class="mode-copy">{{.Description}}</span>
+                                                    </label>
+                                                </div>
+                                                {{end}}
                                             </div>
-                                            <div class="ephemeral-warning" id="ephemeral-warning" style="display:block">
-                                                Detonation VMs should normally stay ephemeral. The watcher destroys them after shutdown and the grace period.
+                                            <div class="network-warning" id="network-warning">
+                                                Internet mode is restricted to ephemeral detonation only and must ride the dedicated public-analysis bridge.
+                                            </div>
+                                        </div>
+
+                                        <div class="form-group">
+                                            <label>&nbsp;</label>
+                                            <div>
+                                                <div class="checkbox-row">
+                                                    <input type="checkbox" name="ephemeral" id="ephemeral-cb" checked />
+                                                    <label for="ephemeral-cb">Ephemeral — auto-destroy when powered off</label>
+                                                </div>
+                                                <div class="ephemeral-warning" id="ephemeral-warning" style="display:block">
+                                                    Detonation VMs should normally stay ephemeral. The watcher destroys them after shutdown and the grace period.
+                                                </div>
                                             </div>
                                         </div>
                                     </div>
                                 </div>
-                            </div>
-                            <div class="form-footer">
-                                <button type="submit" class="btn btn-primary">Launch Sandbox</button>
-                            </div>
-                        </form>
-                    </div>
+                                <div class="form-footer">
+                                    <button type="submit" class="btn btn-primary">Launch Sandbox</button>
+                                </div>
+                            </form>
+                        </div>
+                    </section>
                     {{else}}
                     <section class="hero">
                         <span class="hero-kicker">Persistent Workspaces</span>
@@ -1010,6 +1031,26 @@
         {{end}}
 
         <script>
+            const workflowButtons = Array.from(document.querySelectorAll('[data-workflow-target]'));
+            const workflowPanels = Array.from(document.querySelectorAll('.workflow-panel'));
+            function activateWorkflow(panelID) {
+                workflowButtons.forEach(button => {
+                    const active = button.dataset.workflowTarget === panelID;
+                    button.classList.toggle('active', active);
+                    button.setAttribute('aria-expanded', active ? 'true' : 'false');
+                });
+                workflowPanels.forEach(panel => {
+                    const active = panel.id === panelID;
+                    panel.classList.toggle('active', active);
+                    panel.setAttribute('aria-hidden', active ? 'false' : 'true');
+                });
+            }
+            workflowButtons.forEach(button => {
+                button.addEventListener('click', function() {
+                    activateWorkflow(button.dataset.workflowTarget);
+                });
+            });
+
             // Ephemeral warning
             const launchSandboxForm = document.getElementById('launch-sandbox-form');
             const ephemeralCB = document.getElementById('ephemeral-cb');
