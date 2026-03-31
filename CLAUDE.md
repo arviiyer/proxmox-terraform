@@ -43,6 +43,7 @@ After any OPNsense change: export config XML → commit to `homelab-projects/hom
 - **Job pattern:** both launch and destroy use async jobs (redirect to `/?job=ID`). handleIndex reads `?job=` param, shows banner + placeholder launching/terminating rows. `/job/{id}` page shows Terraform output with 3s auto-refresh while running.
 - **Stale Terraform outputs:** targeted destroys can leave `terraform output -json` values behind even after the VM and resource are gone. For sandbox instance listing and merge logic, trust `terraform show -json` resources, not cached outputs.
 - **FakeNet orchestration fix:** post-launch FakeNet now waits for VM running state, waits for guest-agent-reported non-loopback IPv4 networking, uses the SSH key path (not key contents) for backend guest commands, suppresses SSH host-key warning noise so JSON parsing stays clean, and verifies that the guest resolver actually ends up on `10.0.2.53` before marking the job done.
+- **FakeNet responder recovery:** VM `8050` is not managed by sandbox Terraform state. If it disappears from Proxmox, rebuild it from template `8010` with [`infra/rebuild-sandbox-fakenet.sh`](/home/arvind/codebase/homelab-projects/proxmox-terraform/infra/rebuild-sandbox-fakenet.sh) and then revalidate an app-backed FakeNet launch.
 
 ## Sandbox — Network Mode Status
 
