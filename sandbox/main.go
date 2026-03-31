@@ -1334,10 +1334,12 @@ func stageURLSubmission(ctx context.Context, name string, templateVMID, vmid int
 				"Set-Content -Path $shortcut -Value $shortcutBody -Encoding ASCII\n\n"+
 				"$taskName='SandboxOpenSubmittedURL'\n"+
 				"$triggerTime=(Get-Date).AddMinutes(1).ToString('HH:mm')\n"+
-				"$taskCommand='cmd.exe /c start ' + $url\n"+
+				"$msedge=(Get-ItemProperty 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\msedge.exe' -ErrorAction SilentlyContinue).'(Default)'\n"+
+				"if (-not $msedge) { $msedge='C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe' }\n"+
+				"$taskCommand='\"' + $msedge + '\" --no-first-run --no-default-browser-check ' + $url\n"+
 				"schtasks.exe /Create /TN $taskName /SC ONCE /ST $triggerTime /TR $taskCommand /IT /RU analyst /F | Out-Null\n"+
-				"schtasks.exe /Query /TN $taskName | Out-Null\n"+
 				"schtasks.exe /Run /TN $taskName | Out-Null\n"+
+				"schtasks.exe /Delete /TN $taskName /F | Out-Null\n"+
 				"exit 0\n",
 			submittedURL,
 		)
@@ -1477,7 +1479,8 @@ func runNodeCommand(ctx context.Context, args ...string) error {
 }
 
 type guestExecResult struct {
-	Exited   bool   `json:"exited"`
+	// PVE 9.x returns "exited": 1 (integer), not a JSON boolean.
+	Exited   int    `json:"exited"`
 	ExitCode int    `json:"exitcode"`
 	OutData  string `json:"out-data"`
 	ErrData  string `json:"err-data"`
@@ -1492,9 +1495,11 @@ func runGuestExecCommand(ctx context.Context, vmid int, program string, args ...
 		return "", err
 	}
 
+	// PVE 9.x qm guest exec is synchronous: it blocks until the command exits
+	// and returns the full result inline rather than returning a pid.
 	var immediate guestExecResult
-	if err := json.Unmarshal([]byte(out), &immediate); err == nil && (immediate.Exited || immediate.ExitCode != 0 || immediate.OutData != "" || immediate.ErrData != "") {
-		if immediate.Exited {
+	if err := json.Unmarshal([]byte(out), &immediate); err == nil && (immediate.Exited != 0 || immediate.ExitCode != 0 || immediate.OutData != "" || immediate.ErrData != "") {
+		if immediate.Exited != 0 {
 			if immediate.ExitCode != 0 {
 				msg := strings.TrimSpace(strings.Join([]string{immediate.ErrData, immediate.OutData}, "\n"))
 				if msg != "" {
@@ -1527,7 +1532,7 @@ func runGuestExecCommand(ctx context.Context, vmid int, program string, args ...
 		if err := json.Unmarshal([]byte(statusOut), &status); err != nil {
 			return "", fmt.Errorf("parse guest exec status: %w", err)
 		}
-		if status.Exited {
+		if status.Exited != 0 {
 			if status.ExitCode != 0 {
 				msg := strings.TrimSpace(strings.Join([]string{status.ErrData, status.OutData}, "\n"))
 				if msg != "" {
