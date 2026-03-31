@@ -1,6 +1,8 @@
 package main
 
 import (
+	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 )
@@ -178,5 +180,48 @@ func TestGuestInterfacesReady(t *testing.T) {
 				t.Fatalf("guestInterfacesReady() = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestParseURLSubmissionForm(t *testing.T) {
+	form := url.Values{
+		"submission_url": {"https://example.com/login"},
+		"template_vmid":  {"8010"},
+		"instance_type":  {"sandbox-small"},
+		"name_prefix":    {"url-run"},
+		"vmid_start":     {"400"},
+		"network_mode":   {"fakenet"},
+	}
+	req := httptest.NewRequest("POST", "/submit-url", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	if err := req.ParseForm(); err != nil {
+		t.Fatalf("ParseForm() error: %v", err)
+	}
+
+	got, err := parseURLSubmissionForm(req)
+	if err != nil {
+		t.Fatalf("parseURLSubmissionForm returned error: %v", err)
+	}
+	if got.URL != "https://example.com/login" || got.TemplateVMID != 8010 || got.InstanceType != "sandbox-small" || got.NamePrefix != "url-run" || got.VMIDStart != 400 || got.NetworkMode != "fakenet" {
+		t.Fatalf("unexpected URL submission form: %#v", got)
+	}
+}
+
+func TestParseURLSubmissionFormRejectsInvalidURL(t *testing.T) {
+	form := url.Values{
+		"submission_url": {"not a url"},
+		"template_vmid":  {"8010"},
+		"instance_type":  {"sandbox-small"},
+		"name_prefix":    {"url-run"},
+		"vmid_start":     {"400"},
+	}
+	req := httptest.NewRequest("POST", "/submit-url", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	if err := req.ParseForm(); err != nil {
+		t.Fatalf("ParseForm() error: %v", err)
+	}
+
+	if _, err := parseURLSubmissionForm(req); err == nil {
+		t.Fatal("parseURLSubmissionForm succeeded, want error")
 	}
 }

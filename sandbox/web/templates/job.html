@@ -2,7 +2,7 @@
 <html>
     <head>
         <meta charset="utf-8" />
-        <title>{{if eq .Kind "destroy"}}Terminating{{else}}Launching{{end}} — Sandbox</title>
+        <title>{{if eq .Kind "destroy"}}Terminating{{else if eq .Kind "submit-url"}}Submitting URL{{else}}Launching{{end}} — Sandbox</title>
         <style>
             *, *::before, *::after { box-sizing: border-box; }
 
@@ -129,11 +129,11 @@
         <div class="page">
             <div class="job-header">
                 {{if eq .Status "running"}}
-                <h1><span class="spinner">⟳</span> {{if eq .Kind "destroy"}}Terminating…{{else}}Launching…{{end}}</h1>
+                <h1><span class="spinner">⟳</span> {{if eq .Kind "destroy"}}Terminating…{{else if eq .Kind "submit-url"}}Submitting URL…{{else}}Launching…{{end}}</h1>
                 {{else if eq .Status "done"}}
-                <h1>{{if eq .Kind "destroy"}}✓ Termination complete{{else}}✓ Launch complete{{end}}</h1>
+                <h1>{{if eq .Kind "destroy"}}✓ Termination complete{{else if eq .Kind "submit-url"}}✓ URL submission ready{{else}}✓ Launch complete{{end}}</h1>
                 {{else}}
-                <h1>{{if eq .Kind "destroy"}}✗ Termination failed{{else}}✗ Launch failed{{end}}</h1>
+                <h1>{{if eq .Kind "destroy"}}✗ Termination failed{{else if eq .Kind "submit-url"}}✗ URL submission failed{{else}}✗ Launch failed{{end}}</h1>
                 {{end}}
                 <span class="badge badge-{{.Status}}">{{.Status}}</span>
             </div>
@@ -148,8 +148,26 @@
                         </div>
                         <div class="info-item">
                             <div class="info-label">Operation</div>
-                            <div class="info-value">{{if eq .Kind "destroy"}}Terminate{{else}}Launch{{end}}</div>
+                            <div class="info-value">{{if eq .Kind "destroy"}}Terminate{{else if eq .Kind "submit-url"}}Submit URL{{else}}Launch{{end}}</div>
                         </div>
+                        {{if .SubmissionURL}}
+                        <div class="info-item" style="grid-column: 1 / -1">
+                            <div class="info-label">Submitted URL</div>
+                            <div class="info-value mono">{{.SubmissionURL}}</div>
+                        </div>
+                        {{end}}
+                        {{if .StagedPath}}
+                        <div class="info-item">
+                            <div class="info-label">Staged Path</div>
+                            <div class="info-value mono">{{.StagedPath}}</div>
+                        </div>
+                        {{end}}
+                        {{if and .StagedPath (gt (len .Names) 0)}}
+                        <div class="info-item">
+                            <div class="info-label">Console</div>
+                            <div class="info-value"><a class="back-link" href="/console/{{index .Names 0}}" target="_blank">Open Console</a></div>
+                        </div>
+                        {{end}}
                         <div class="info-item" style="grid-column: 1 / -1">
                             <div class="info-label">{{if eq .Kind "destroy"}}Instance{{else}}Instances{{end}}</div>
                             <div class="info-value" style="margin-top:4px">
@@ -164,7 +182,7 @@
 
             {{if eq .Status "running"}}
             <div class="hint-running">
-                <span class="spinner">⟳</span> &nbsp;Terraform is running. This page refreshes every 3 seconds.
+                <span class="spinner">⟳</span> &nbsp;{{if eq .Kind "submit-url"}}The VM is launching and the URL will be staged inside the guest.{{else}}Terraform is running.{{end}} This page refreshes every 3 seconds.
             </div>
             {{end}}
 
