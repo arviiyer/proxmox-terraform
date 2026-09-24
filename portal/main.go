@@ -89,9 +89,9 @@ var (
 
 // Job tracks an async Terraform operation (launch or destroy).
 type Job struct {
-	ID    string
-	Names []string // VM names affected
-	Kind  string   // "launch" | "destroy"
+	ID     string
+	Names  []string // VM names affected
+	Kind   string   // "launch" | "destroy"
 	mu     sync.Mutex
 	status string // "running" | "done" | "failed"
 	logs   string
