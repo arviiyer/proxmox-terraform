@@ -243,8 +243,8 @@ func TestParseInstancesFromShow(t *testing.T) {
 			"vm_id":     float64(200),
 			"node_name": "summerset",
 			"ipv4_addresses": []any{
-				[]any{"127.0.0.1"},       // loopback, should be skipped
-				[]any{"10.0.0.5"},        // match
+				[]any{"127.0.0.1"}, // loopback, should be skipped
+				[]any{"10.0.0.5"},  // match
 			},
 		},
 		{
